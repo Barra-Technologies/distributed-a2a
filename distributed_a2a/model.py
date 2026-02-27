@@ -10,6 +10,7 @@ class SkillConfig(BaseModel):
     name: str = Field(description="The name of the skill e.g. weather")
     description: str = Field(description="A short description of the skill")
     tags: List[str] = Field(description="The tags associated with the skill")
+    examples: Optional[List[str]] = Field(description="Examples of how to use the skill", default=[])
 
 
 class RegistryItemConfig(BaseModel):
@@ -44,6 +45,7 @@ class AgentItem(BaseModel):
     card: CardConfig = Field(description="The agent card configuration node")
     llm: LLMConfig = Field(description="The LLM configuration node")
     system_prompt: str = Field(description="The system prompt to use for the LLM or a path to a file containing the system prompt")
+    llm_tools: Optional[List[str]] = Field(description="The LLM tools supported by the agent", default=None)
 
     def __init__(self, /, **data: Any) -> None:
         prompt_or_path= data['system_prompt']

@@ -1,7 +1,7 @@
 from .client import RoutingA2AClient
 from .router import load_router
 from .server import load_app
-from .registry_server import load_registry, InMemoryMcpRegistry, InMemoryAgentRegistry
+from .registry_server import load_registry, InMemoryMcpRegistry, InMemoryAgentRegistry, DynamoDbMcpRegistryLookup, DynamoDbAgentRegistryLookup
 from .registry import registry_heart_beat, AgentRegistryLookup as AgentRegistryClient, \
     McpRegistryLookup as McpRegistryClient
 from .model import AgentConfig, SkillConfig, RegistryItemConfig, RegistryConfig, LLMConfig, CardConfig, AgentItem, \
@@ -25,5 +25,8 @@ __all__ = [
     "AgentRegistryClient",
     "McpRegistryClient",
     "InMemoryAgentRegistry",
-    "InMemoryMcpRegistry"
+    "InMemoryMcpRegistry",
+    "DynamoDbMcpRegistryLookup",
+    "DynamoDbAgentRegistryLookup"
+
 ]

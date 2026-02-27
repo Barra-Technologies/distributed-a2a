@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from logging import Logger
-from typing import Optional, Any
+from typing import Optional, Any, Sequence, Callable
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -29,7 +29,7 @@ You are a helpful routing assistant which routes user requests to specialized re
 
 class RoutingAgentExecutor(AgentExecutor):
 
-    def __init__(self, agent_config: AgentConfig, routing_tool: BaseTool, tools: list[BaseTool] | None = None,
+    def __init__(self, agent_config: AgentConfig, routing_tool: BaseTool, tools: Sequence[BaseTool | Callable | dict[str, Any]] | None = None,
                  routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None,
                  specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None):
         super().__init__()
@@ -51,13 +51,16 @@ class RoutingAgentExecutor(AgentExecutor):
         self.agent_config = agent_config
         self.registered_tools: dict[str, Any] = {}
         self.api_key = api_key
+        local_tools = [] if tools is None else tools
+        self.llm_tools = [{ llm_tool: {} } for llm_tool in agent_config.agent.llm_tools] if agent_config.agent.llm_tools else []
+
         self.agent = StatusAgent[StringResponse](
             llm_config=agent_config.agent.llm,
             system_prompt=agent_config.agent.system_prompt,
             name=agent_config.agent.card.name,
             api_key=api_key,
             is_routing=False,
-            tools=[] if tools is None else tools,
+            tools=local_tools.append(self.llm_tools),
             checkpointer=specialized_checkpointer
         )
         self.routing_agent = StatusAgent[RoutingResponse](
@@ -112,7 +115,7 @@ class RoutingAgentExecutor(AgentExecutor):
         else:
             logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
             artifact = new_text_artifact(name='current_result', description='Result of request to agent.',
-                                         text=agent_response.response)
+                                         text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}")
 
         # publish actual result
         await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
@@ -145,7 +148,7 @@ class RoutingAgentExecutor(AgentExecutor):
             name=self.agent_config.agent.card.name,
             api_key=self.api_key,
             is_routing=False,
-            tools=mcp_tools,
+            tools=mcp_tools.append(self.llm_tools),
         )
 
 

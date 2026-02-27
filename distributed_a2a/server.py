@@ -23,9 +23,9 @@ CAPABILITIES = AgentCapabilities(streaming=False, push_notifications=False)
 HEART_BEAT_INTERVAL_SEC = 5
 MAX_HEART_BEAT_MISSES = 3
 
+
 def get_expire_at() -> int:
     return int(time.time() + MAX_HEART_BEAT_MISSES * HEART_BEAT_INTERVAL_SEC)
-
 
 
 async def heart_beat(name: str, agent_card_table: str, agent_card: AgentCard) -> None:
@@ -40,15 +40,15 @@ async def heart_beat(name: str, agent_card_table: str, agent_card: AgentCard) ->
         )
 
 
-
-
-def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None, specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None) -> FastAPI:
+def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None,
+             specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None) -> FastAPI:
     skills = [AgentSkill(
         id=skill.id,
         name=skill.name,
         description=skill.description,
-        tags=skill.tags)
-    for skill in agent_config.agent.card.skills]
+        tags=skill.tags,
+        examples=skill.examples)
+        for skill in agent_config.agent.card.skills]
     skills.append(AgentSkill(
         id='routing',
         name='Agent routing',
@@ -86,7 +86,6 @@ def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheck
 
         yield
 
-
     root_path = settings.api_root_path or f"/{agent_config.agent.card.name}"
     if root_path == "/":
         root_path = ""
@@ -95,6 +94,6 @@ def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheck
         agent_card=agent_card,
         http_handler=DefaultRequestHandler(
             agent_executor=executor,
-            task_store=InMemoryTaskStore() #TODO replace with dynamodb store
+            task_store=InMemoryTaskStore()  # TODO replace with dynamodb store
 
         )).build(title=agent_card.name, lifespan=lifespan, root_path=root_path)
