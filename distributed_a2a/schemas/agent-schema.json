@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent Configuration Schema",
+  "type": "object",
+  "properties": {
+    "agent": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "The url of the agent registry"
+                }
+              }
+            },
+            "mcp": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "The url of the MCP registry"
+                }
+              }
+            }
+          }
+        },
+        "system_prompt": {
+          "type": "string",
+          "description": "The system prompt to use for the LLM or a path to a file containing the system prompt"
+        },
+        "card": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The name of the agent"
+            },
+            "version": {
+              "type": "string",
+              "description": "The version of the agent"
+            },
+            "default_input_modes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The default input modes supported by the agent",
+              "default": ["text", "text/plaintext"]
+            },
+            "default_output_modes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The default output modes supported by the agent",
+              "default": ["text", "text/plaintext"]
+            },
+            "preferred_transport_protocol": {
+              "type": "string",
+              "description": "The preferred transport protocol for the agent",
+              "default": "HTTP+JSON"
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "description": "The url of the agent"
+            },
+            "description": {
+              "type": "string",
+              "description": "A short description of the agent"
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "The id of the skill e.g. weather"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "The name of the skill e.g. weather"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "A short description of the skill"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The tags associated with the skill"
+                  }
+                },
+                "required": ["id", "name", "description", "tags"]
+              },
+              "description": "The skills supported by the agent",
+              "default": []
+            }
+          },
+          "required": ["name", "version", "url", "description"]
+        },
+        "llm": {
+          "type": "object",
+          "properties": {
+            "base_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "The base url of the LLM provider"
+            },
+            "model": {
+              "type": "string",
+              "description": "The model to use for the LLM e.g. gpt-3.5-turbo"
+            },
+            "api_key_env": {
+              "type": "string",
+              "description": "The environment variable containing the api key for the LLM provider"
+            },
+            "reasoning_effort": {
+              "type": "string",
+              "enum": ["low", "medium", "high"],
+              "description": "The reasoning effort to use for the LLM",
+              "default": "high"
+            }
+          },
+          "required": ["base_url", "model", "api_key_env"]
+        }
+      },
+      "required": ["system_prompt", "card", "llm"]
+    }
+  },
+  "required": ["agent"]
+}

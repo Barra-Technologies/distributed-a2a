@@ -1,0 +1,9 @@
+# idea
+.idea
+distributed-a2a.iml
+
+
+# pypi package
+distributed_a2a/build
+distributed_a2a/distributed_a2a.egg-info
+distributed_a2a/dist

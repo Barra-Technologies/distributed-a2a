@@ -1,0 +1,50 @@
+name: Publish distributed-a2a to PyPI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-n-publish:
+    name: Build and publish Python 🐍 distribution 📦 to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Mandatory for trusted publishing
+      contents: write
+
+    steps:
+    - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6
+      with:
+        ref: main #publish new version allways from main
+
+    - name: Set up Python
+      uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6
+      with:
+        python-version: "3.14"
+    - name: prepare ci dependencies
+      id: bump
+      working-directory: distributed_a2a
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-ci.txt
+        pip install -r requirements.txt
+        make mypy
+        make bump-patch
+        NEW_VERSION=$(toml get --toml-path pyproject.toml project.version)
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+    - name: commit bumped version
+      uses: stefanzweifel/git-auto-commit-action@v7
+      with:
+        commit_message: "Bump version to ${{ steps.bump.outputs.version }}"
+        tag_name: 'v${{steps.bump.outputs.version}}'
+        branch: main
+        file_pattern: distributed_a2a/pyproject.toml
+
+    - name: Build binary wheel and source tarball
+      run: |
+        pip install -r requirements.txt
+        make upload
+      working-directory: distributed_a2a
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
