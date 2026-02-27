@@ -104,12 +104,14 @@ class DynamoDbMcpRegistryLookup(McpRegistryLookup):
             The McpServer instance, or None if not found.
         """
         response = self.table.get_item(Key={"id": name})
-        item: dict[str, str | set[str]] = response.get("Item")
+        item: dict[str, Any] | None = response.get("Item")
         if item:
-            return McpServer.model_validate_json(item.get(MCP_SERVER_COLUMN))
+            server_json = item.get(MCP_SERVER_COLUMN)
+            if isinstance(server_json, str):
+                return McpServer.model_validate_json(server_json)
         return None
 
-    def put_mcp_server(self, server: McpServer, allowed_agents: set[str] = None) -> None:
+    def put_mcp_server(self, server: McpServer, allowed_agents: set[str] | None = None) -> None:
         """Registers or updates an MCP server in DynamoDB.
 
          Args:
@@ -138,7 +140,9 @@ class DynamoDbMcpRegistryLookup(McpRegistryLookup):
         item: dict[str, Any] | None = response.get("Item")
         logging.info(item)
         if item and ALLOWED_AGENTS_FIELD in item:
-            return item.get(ALLOWED_AGENTS_FIELD)
+            agents = item.get(ALLOWED_AGENTS_FIELD)
+            if isinstance(agents, set):
+                return cast(set[str], agents)
         return set()
 
     ## TODO Cross check if agent exists
@@ -153,13 +157,16 @@ class DynamoDbMcpRegistryLookup(McpRegistryLookup):
             Exception: If the MCP server is not found.
         """
         response = self.table.get_item(Key={"id": server_name})
-        item: dict[str, str | set[str]] = response.get("Item")
+        item: dict[str, Any] | None = response.get("Item")
         if not item:
             raise Exception(f"MCP server '{server_name}' not found")
 
-        server = McpServer.model_validate_json(item.get(MCP_SERVER_COLUMN))
+        server_json = item.get(MCP_SERVER_COLUMN)
+        if not isinstance(server_json, str):
+            raise Exception(f"Invalid server data for '{server_name}'")
+        server = McpServer.model_validate_json(server_json)
         allowed_agents_raw = item.get(ALLOWED_AGENTS_FIELD)
-        allowed_agents: set[str] = allowed_agents_raw if allowed_agents_raw is not None else set()
+        allowed_agents: set[str] = cast(set[str], allowed_agents_raw) if isinstance(allowed_agents_raw, set) else set()
 
         if agent_name not in allowed_agents:
             allowed_agents.add(agent_name)
@@ -177,13 +184,16 @@ class DynamoDbMcpRegistryLookup(McpRegistryLookup):
             Exception: If the MCP server is not found.
         """
         response = self.table.get_item(Key={"id": server_name})
-        item: dict[str, str | set[str]] = response.get("Item")
+        item: dict[str, Any] | None = response.get("Item")
         if not item:
             raise Exception(f"MCP server '{server_name}' not found")
 
-        server = McpServer.model_validate_json(item.get(MCP_SERVER_COLUMN))
+        server_json = item.get(MCP_SERVER_COLUMN)
+        if not isinstance(server_json, str):
+            raise Exception(f"Invalid server data for '{server_name}'")
+        server = McpServer.model_validate_json(server_json)
         allowed_agents_raw = item.get(ALLOWED_AGENTS_FIELD)
-        allowed_agents: set[str] | None = allowed_agents_raw
+        allowed_agents: set[str] | None = cast(set[str], allowed_agents_raw) if isinstance(allowed_agents_raw, set) else None
         if allowed_agents and agent_name in allowed_agents:
             allowed_agents.remove(agent_name)
             self.put_mcp_server(server=server, allowed_agents=allowed_agents)

@@ -30,4 +30,4 @@ upload:
 	python3 -m twine upload dist/*
 
 mypy:
-	mypy distributed_a2a
+	mypy .
