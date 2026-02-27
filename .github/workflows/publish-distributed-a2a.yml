@@ -37,7 +37,7 @@ jobs:
         commit_message: "Bump version to ${{ steps.bump.outputs.version }}"
         tag_name: 'v${{steps.bump.outputs.version}}'
         branch: main
-        file_pattern: distributed_a2a/pyproject.toml
+        file_pattern: pyproject.toml
 
     - name: Build binary wheel and source tarball
       run: |
