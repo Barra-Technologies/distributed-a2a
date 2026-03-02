@@ -74,7 +74,7 @@ def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheck
         agent_registry_url = agent_config.agent.registry.agent.url
     agent_registry = AgentRegistryLookup(agent_registry_url, req_opts=req_opts)
     executor = RoutingAgentExecutor(agent_config=agent_config,
-                                    routing_tool=agent_registry.as_tool(),
+                                    agent_registry=agent_registry,
                                     routing_checkpointer=routing_checkpointer,
                                     specialized_checkpointer=specialized_checkpointer)
 
