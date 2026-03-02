@@ -54,7 +54,7 @@ class RoutingAgentExecutor(AgentExecutor):
         agent_tools = [] if tools is None else tools
         self.llm_tools = [{ llm_tool: {} } for llm_tool in agent_config.agent.llm_tools] if agent_config.agent.llm_tools else []
 
-        agent_tools.append(self.llm_tools)
+        agent_tools.extend(self.llm_tools)
         logger.info(f"Agent tools: {agent_tools}")
 
 
@@ -145,7 +145,7 @@ class RoutingAgentExecutor(AgentExecutor):
                                 "headers": settings.get_mcp_auth_headers(tool["name"])} for tool in mcp_server_raw}
         mcp_client = MultiServerMCPClient(mcp_servers)  # type: ignore[arg-type]
         agent_tools: list[BaseTool | dict[str, Any]] = await mcp_client.get_tools()
-        agent_tools.append(self.llm_tools)
+        agent_tools.extend(self.llm_tools)
 
         self.agent = StatusAgent[StringResponse](
             llm_config=self.agent_config.agent.llm,
