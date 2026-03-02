@@ -3,7 +3,7 @@ from typing import List, Any, Optional
 
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 
 class SkillConfig(BaseModel):
     id: str = Field(description="The id of the skill e.g. weather")

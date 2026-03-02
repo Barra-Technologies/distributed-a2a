@@ -40,15 +40,13 @@ async def heart_beat(name: str, agent_card_table: str, agent_card: AgentCard) ->
         )
 
 
-
-
-def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None, specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None) -> FastAPI:
+def get_agent_card(agent_config: AgentConfig) -> AgentCard:
     skills = [AgentSkill(
         id=skill.id,
         name=skill.name,
         description=skill.description,
         tags=skill.tags)
-    for skill in agent_config.agent.card.skills]
+        for skill in agent_config.agent.card.skills]
     skills.append(AgentSkill(
         id='routing',
         name='Agent routing',
@@ -67,6 +65,10 @@ def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheck
         preferred_transport=agent_config.agent.card.preferred_transport_protocol,
         capabilities=CAPABILITIES
     )
+    return agent_card
+
+def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None, specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None) -> FastAPI:
+    agent_card = get_agent_card(agent_config)
     req_opts = settings.registry_auth_headers
 
     agent_registry_url = ""

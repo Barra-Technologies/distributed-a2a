@@ -1,5 +1,6 @@
+import asyncio
 import json
-import time
+import logging
 from uuid import uuid4
 
 import httpx
@@ -11,6 +12,7 @@ from a2a.types import (
 )
 from a2a.types import TaskState
 
+MAX_REQUESTS = 10
 
 class RemoteAgentConnection:
     """A class to hold the connections to the remote agents."""
@@ -64,8 +66,8 @@ class RemoteAgentConnection:
 
         task_state = response.status.state
         if task_state == TaskState.working or task_state == TaskState.submitted:
-            if count < 50:
-                time.sleep(round(pow(1.05,count))) ##Do exponential backoff number^count
+            if count < MAX_REQUESTS:
+                await asyncio.sleep(round(pow(1.05,count)))
                 return await self.send_message(message_to_send, context_id, response.id, count + 1)
             else:
                 raise Exception("Timeout waiting for agent to respond")
