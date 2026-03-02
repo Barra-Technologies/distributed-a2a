@@ -55,13 +55,16 @@ class RoutingAgentExecutor(AgentExecutor):
         self.llm_tools = [{ llm_tool: {} } for llm_tool in agent_config.agent.llm_tools] if agent_config.agent.llm_tools else []
         logger.info(f"Local tools: {local_tools}")
 
+        agent_tools = local_tools.copy()
+        agent_tools.append(self.llm_tools)
+
         self.agent = StatusAgent[StringResponse](
             llm_config=agent_config.agent.llm,
             system_prompt=agent_config.agent.system_prompt,
             name=agent_config.agent.card.name,
             api_key=api_key,
             is_routing=False,
-            tools=local_tools.append(self.llm_tools),
+            tools=agent_tools,
             checkpointer=specialized_checkpointer
         )
         self.routing_agent = StatusAgent[RoutingResponse](
@@ -143,13 +146,16 @@ class RoutingAgentExecutor(AgentExecutor):
         mcp_client = MultiServerMCPClient(tools)  # type: ignore[arg-type]
         mcp_tools: list[BaseTool | dict[str, Any]] = await mcp_client.get_tools()
 
+        tools = mcp_tools.copy()
+        tools.append(self.llm_tools)
+
         self.agent = StatusAgent[StringResponse](
             llm_config=self.agent_config.agent.llm,
             system_prompt=self.agent_config.agent.system_prompt,
             name=self.agent_config.agent.card.name,
             api_key=self.api_key,
             is_routing=False,
-            tools=mcp_tools.append(self.llm_tools),
+            tools=tools,
         )
 
 
