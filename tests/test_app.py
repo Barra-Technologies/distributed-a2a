@@ -56,12 +56,12 @@ def fake_registry_server():
 async def test_app_completed_path(fake_registry_server, fake_completed_llm):
     # Given
     with TestAgent(fake_registry_server, fake_completed_llm, "test-agent") as agent:
-        # When: Using RoutingA2AClient to send a message
+        # When
         client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{agent.app_port}/{agent.name}")
         response = await client.send_message(message="Hello", context_id="test-context")
 
-        # Then: Check the response
-        assert "This is a mock response from the fake OpenAI server." in response
+        # Then
+        assert FINAL_RESPONSE in response
 
 
 @pytest.mark.asyncio
