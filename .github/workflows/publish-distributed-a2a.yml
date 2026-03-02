@@ -25,7 +25,6 @@ jobs:
         pip install -r requirements-ci.txt
         pip install -r requirements.txt
         make mypy
-       #make bump-patch
         NEW_VERSION=$(toml get --toml-path pyproject.toml project.version)
         echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
