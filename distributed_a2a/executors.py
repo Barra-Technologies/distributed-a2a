@@ -51,12 +51,12 @@ class RoutingAgentExecutor(AgentExecutor):
         self.agent_config = agent_config
         self.registered_tools: dict[str, Any] = {}
         self.api_key = api_key
-        local_tools = [] if tools is None else tools
+        agent_tools = [] if tools is None else tools
         self.llm_tools = [{ llm_tool: {} } for llm_tool in agent_config.agent.llm_tools] if agent_config.agent.llm_tools else []
-        logger.info(f"Local tools: {local_tools}")
 
-        agent_tools = local_tools.copy()
         agent_tools.append(self.llm_tools)
+        logger.info(f"Agent tools: {agent_tools}")
+
 
         self.agent = StatusAgent[StringResponse](
             llm_config=agent_config.agent.llm,
@@ -141,13 +141,11 @@ class RoutingAgentExecutor(AgentExecutor):
             return
 
         logger.info(f"Agent {self.agent_config.agent.card.name} has access to the following tools: {mcp_server_raw}")
-        tools = {tool["name"]: {"url": tool["url"], "transport": tool["protocol"],
+        mcp_servers = {tool["name"]: {"url": tool["url"], "transport": tool["protocol"],
                                 "headers": settings.get_mcp_auth_headers(tool["name"])} for tool in mcp_server_raw}
-        mcp_client = MultiServerMCPClient(tools)  # type: ignore[arg-type]
-        mcp_tools: list[BaseTool | dict[str, Any]] = await mcp_client.get_tools()
-
-        tools = mcp_tools.copy()
-        tools.append(self.llm_tools)
+        mcp_client = MultiServerMCPClient(mcp_servers)  # type: ignore[arg-type]
+        agent_tools: list[BaseTool | dict[str, Any]] = await mcp_client.get_tools()
+        agent_tools.append(self.llm_tools)
 
         self.agent = StatusAgent[StringResponse](
             llm_config=self.agent_config.agent.llm,
@@ -155,7 +153,7 @@ class RoutingAgentExecutor(AgentExecutor):
             name=self.agent_config.agent.card.name,
             api_key=self.api_key,
             is_routing=False,
-            tools=tools,
+            tools=agent_tools,
         )
 
 
