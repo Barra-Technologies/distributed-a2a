@@ -1,12 +1,11 @@
 import json
 import logging
-import os
 from logging import Logger
 from typing import Optional, Any
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import TaskStatusUpdateEvent, TaskStatus, TaskState, TaskArtifactUpdateEvent, Artifact, AgentCard
+from a2a.types import TaskStatusUpdateEvent, TaskStatus, TaskState, TaskArtifactUpdateEvent, Artifact
 from a2a.utils import new_text_artifact
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -78,54 +77,64 @@ class RoutingAgentExecutor(AgentExecutor):
         if context.context_id is None or context.task_id is None:
             raise ValueError("Context ID and Task ID must be provided.")
 
-        # set status to processing
-        await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(state=TaskState.working),
-                                                              final=False,
-                                                              context_id=context.context_id,
-                                                              task_id=context.task_id))
-        await self.reinitialize_agent_with_tools()
-        agent_response: StringResponse = await self.agent(message=context.get_user_input(),
-                                                          context_id=context.context_id)
+        try:
+            # set status to processing
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(state=TaskState.working),
+                                                                  final=False,
+                                                                  context_id=context.context_id,
+                                                                  task_id=context.task_id))
+            await self.reinitialize_agent_with_tools()
+            agent_response: StringResponse = await self.agent(message=context.get_user_input(),
+                                                              context_id=context.context_id)
 
-        artifact: Artifact
-        if agent_response.status == TaskState.rejected:
-            routing_agent_response: RoutingResponse = await self.routing_agent(message=context.get_user_input(),
-                                                                               context_id=context.context_id)
-            agent_card = routing_agent_response.agent_card
-            if isinstance(agent_card, str):
-                try:
+            artifact: Artifact
+            if agent_response.status == TaskState.rejected:
+                routing_agent_response: RoutingResponse = await self.routing_agent(message=context.get_user_input(),
+                                                                                   context_id=context.context_id)
+                agent_card = routing_agent_response.agent_card
+                if isinstance(agent_card, str):
+                    try:
+                        logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
+                        agent_card_dict = json.loads(agent_card)
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse agent_card as JSON: {agent_card}")
+                        raise
+                else:
                     logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
-                    agent_card_dict = json.loads(agent_card)
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse agent_card as JSON: {agent_card}")
-                    raise
+                    agent_card_dict = agent_card
+
+                agent_name: str = agent_card_dict["name"]
+                logger.info(
+                    f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.",
+                    extra={"card": routing_agent_response.agent_card})
+                artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
+                                             text=json.dumps(agent_card_dict) if isinstance(agent_card_dict,
+                                                                                            dict) else str(
+                                                 agent_card))
             else:
-                logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
-                agent_card_dict = agent_card
+                logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
+                artifact = new_text_artifact(name='current_result', description='Result of request to agent.',
+                                             text=agent_response.response)
 
-            agent_name: str = agent_card_dict["name"]
-            logger.info(f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.",
-                        extra={"card": routing_agent_response.agent_card})
-            artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
-                                         text=json.dumps(agent_card_dict) if isinstance(agent_card_dict, dict) else str(
-                                             agent_card))
-        else:
-            logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
-            artifact = new_text_artifact(name='current_result', description='Result of request to agent.',
-                                         text=agent_response.response)
-
-        # publish actual result
-        await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
-                                                                context_id=context.context_id,
-                                                                task_id=context.task_id,
-                                                                last_chunk=True,
-                                                                artifact=artifact))
-        # set and publish the final status
-        await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-            state=TaskState(agent_response.status)),
-            final=True,
-            context_id=context.context_id,
-            task_id=context.task_id))
+            # publish actual result
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
+                                                                    context_id=context.context_id,
+                                                                    task_id=context.task_id,
+                                                                    last_chunk=True,
+                                                                    artifact=artifact))
+            # set and publish the final status
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
+                state=TaskState(agent_response.status)),
+                final=True,
+                context_id=context.context_id,
+                task_id=context.task_id))
+        except Exception as e:
+            logger.error(f"Error executing agent task for context {context.context_id}: {e}",)
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(
+                status=TaskStatus(state=TaskState.failed),
+                final=True,
+                context_id=context.context_id,
+                task_id=context.task_id))
 
     async def reinitialize_agent_with_tools(self) -> None:
         mcp_server_raw = self.mcp_registry.get_mcp_tool_for_agent(self.agent_config.agent.card.name)
