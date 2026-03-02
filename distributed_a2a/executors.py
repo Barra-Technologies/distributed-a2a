@@ -15,21 +15,32 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from .agent import StatusAgent, RoutingResponse, StringResponse
 from .config import settings
 from .model import AgentConfig, RouterConfig
-from .registry import McpRegistryLookup
+from .registry import McpRegistryLookup, AgentRegistryLookup
 
 logger: Logger = logging.getLogger(__name__)
 
 ROUTING_SYSTEM_PROMPT = """
-You are a helpful routing assistant which routes user requests to specialized remote agents. Your main task is to:
-1. look up available agents via their A2A agent cards
-2. select the best matching agent for the user query, in case no agent matches use the generic agent.
-3. return the matching agent card for that agent.
+# Role: Multi-agent Router
+
+You are a helpful routing assistant which routes user requests to specialized remote agents in  a multi-agent setup.
+
+## Core capability & Task
+Your main task is to:
+1. look up available agents via the provided registry tool
+2. select the best matching agent for the user query.
+3. return the agent_name for the selected agent.
+
+## Rules
+- Return only the agent_name as a string.
+- If the user query is relevant to multiple agents, return the agent_name of the agent with the highest match.
+- If the user query is not relevant to any agent, return the agent_name of the generic agent.
+- If no generic agent is available, return an error message.
 """
 
 
 class RoutingAgentExecutor(AgentExecutor):
 
-    def __init__(self, agent_config: AgentConfig, routing_tool: BaseTool, tools: Sequence[BaseTool | Callable | dict[str, Any]] | None = None,
+    def __init__(self, agent_config: AgentConfig, agent_registry: AgentRegistryLookup, tools: Sequence[BaseTool | Callable | dict[str, Any]] | None = None,
                  routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None,
                  specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None):
         super().__init__()
@@ -67,13 +78,14 @@ class RoutingAgentExecutor(AgentExecutor):
             tools=agent_tools,
             checkpointer=specialized_checkpointer
         )
+        self.agent_registry = agent_registry
         self.routing_agent = StatusAgent[RoutingResponse](
             llm_config=agent_config.agent.llm,
             system_prompt=ROUTING_SYSTEM_PROMPT,
             name="Router",
             api_key=api_key,
             is_routing=True,
-            tools=[routing_tool],
+            tools=[agent_registry.as_tool()],
             checkpointer=routing_checkpointer
 
         )
@@ -96,26 +108,7 @@ class RoutingAgentExecutor(AgentExecutor):
 
         artifact: Artifact
         if agent_response.status == TaskState.rejected:
-            routing_agent_response: RoutingResponse = await self.routing_agent(message=context.get_user_input(),
-                                                                               context_id=context.context_id)
-            agent_card = routing_agent_response.agent_card
-            if isinstance(agent_card, str):
-                try:
-                    logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
-                    agent_card_dict = json.loads(agent_card)
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse agent_card as JSON: {agent_card}")
-                    raise
-            else:
-                logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
-                agent_card_dict = agent_card
-
-            agent_name: str = agent_card_dict["name"]
-            logger.info(f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.",
-                        extra={"card": routing_agent_response.agent_card})
-            artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
-                                         text=json.dumps(agent_card_dict) if isinstance(agent_card_dict, dict) else str(
-                                             agent_card))
+            artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
         else:
             logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
             artifact = new_text_artifact(name='current_result', description='Result of request to agent.',
@@ -158,11 +151,13 @@ class RoutingAgentExecutor(AgentExecutor):
 
 
 class RoutingExecutor(AgentExecutor):
-    def __init__(self, router_config: RouterConfig, routing_tool: BaseTool) -> None:
+    def __init__(self, router_config: RouterConfig, agent_registry: AgentRegistryLookup) -> None:
         super().__init__()
         api_key = settings.get_env_var(router_config.router.llm.api_key_env)
         if api_key is None:
             raise ValueError("No API key found for LLM.")
+
+        self.agent_registry = agent_registry
 
         self.routing_agent = StatusAgent[RoutingResponse](
             llm_config=router_config.router.llm,
@@ -170,7 +165,7 @@ class RoutingExecutor(AgentExecutor):
             name=router_config.router.card.name,
             api_key=api_key,
             is_routing=True,
-            tools=[routing_tool]
+            tools=[agent_registry.as_tool() ]
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -185,34 +180,7 @@ class RoutingExecutor(AgentExecutor):
                                                               context_id=context.context_id,
                                                               task_id=context.task_id))
 
-        agent_response: RoutingResponse = await self.routing_agent(message=context.get_user_input(),
-                                                                   context_id=context.context_id)
-        logger.info(f"Routing agent response for request with id {context.context_id}: {agent_response}")
-        agent_card = agent_response.agent_card
-        error_artifact: Artifact | None = None
-        if isinstance(agent_card, str):
-            try:
-                agent_card_dict = json.loads(agent_card)
-                logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card_dict}")
-            except json.JSONDecodeError:
-                # If it's not JSON, maybe it's already the name or something else?
-                # But AgentCard expects a dict if we use model_validate
-                logger.warning(f"Failed to parse agent_card as JSON: {agent_card}")
-                artifact_text = agent_card if agent_card and isinstance(agent_card,
-                                                                        str) else "No agent found to handle the request."
-                error_artifact = new_text_artifact(name='current_result',
-                                                   description='Error message from routing agent.',
-                                                   text=artifact_text)
-
-        else:
-            agent_card_dict = agent_card
-
-        if error_artifact:
-            artifact = error_artifact
-        else:
-            artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
-                                         text=json.dumps(agent_card_dict) if isinstance(agent_card_dict, dict) else str(
-                                             agent_card))
+        artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
 
         # publish actual result
         await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
@@ -222,7 +190,25 @@ class RoutingExecutor(AgentExecutor):
                                                                 artifact=artifact))
         # set and publish the final status
         await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-            state=TaskState(agent_response.status)),
+            state=TaskState.completed),
             final=True,
             context_id=context.context_id,
             task_id=context.task_id))
+
+
+async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingResponse], agent_registry: AgentRegistryLookup, context):
+    routing_agent_response: RoutingResponse = await routing_agent(message=context.get_user_input(),
+                                                                  context_id=context.context_id)
+    agent_name: str = routing_agent_response.agent_name
+    if agent_name is None:
+        logger.error(f"Failed to identify agent name")
+        raise
+    logger.info(f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.")
+    agent_card: dict[str, Any] = agent_registry.get_agent_card(agent_name)
+    if agent_card is None:
+        logger.error(f"agent not found  for name: {agent_name}")
+        raise
+    logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
+    artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
+                                 text=json.dumps(agent_card))
+    return artifact
