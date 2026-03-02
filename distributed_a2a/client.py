@@ -65,7 +65,7 @@ class RemoteAgentConnection:
         task_state = response.status.state
         if task_state == TaskState.working or task_state == TaskState.submitted:
             if count < 50:
-                time.sleep(round(pow(1.2,count))) ##Do exponential backoff number^count
+                time.sleep(round(pow(1.05,count))) ##Do exponential backoff number^count
                 return await self.send_message(message_to_send, context_id, response.id, count + 1)
             else:
                 raise Exception("Timeout waiting for agent to respond")

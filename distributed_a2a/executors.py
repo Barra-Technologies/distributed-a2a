@@ -53,6 +53,7 @@ class RoutingAgentExecutor(AgentExecutor):
         self.api_key = api_key
         local_tools = [] if tools is None else tools
         self.llm_tools = [{ llm_tool: {} } for llm_tool in agent_config.agent.llm_tools] if agent_config.agent.llm_tools else []
+        logger.info(f"Local tools: {local_tools}")
 
         self.agent = StatusAgent[StringResponse](
             llm_config=agent_config.agent.llm,
@@ -140,7 +141,7 @@ class RoutingAgentExecutor(AgentExecutor):
         tools = {tool["name"]: {"url": tool["url"], "transport": tool["protocol"],
                                 "headers": settings.get_mcp_auth_headers(tool["name"])} for tool in mcp_server_raw}
         mcp_client = MultiServerMCPClient(tools)  # type: ignore[arg-type]
-        mcp_tools = await mcp_client.get_tools()
+        mcp_tools: list[BaseTool | dict[str, Any]] = await mcp_client.get_tools()
 
         self.agent = StatusAgent[StringResponse](
             llm_config=self.agent_config.agent.llm,
