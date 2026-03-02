@@ -23,7 +23,7 @@ class AgentResponse(BaseModel):
 
 
 class RoutingResponse(AgentResponse):
-    agent_name: str = Field(description="The name of the agent to be returned to the user")
+    agent_name: str = Field(description="The agent_name of the agent to be returned to the user")
 
 
 class StringResponse(AgentResponse):
