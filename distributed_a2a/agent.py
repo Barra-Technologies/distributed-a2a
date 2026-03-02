@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Callable, Sequence
 
 from a2a.types import TaskState
 from langchain.agents import create_agent
@@ -33,7 +33,8 @@ class StringResponse(AgentResponse):
 class StatusAgent[ResponseT: AgentResponse]:
 
     def __init__(self, llm_config: LLMConfig, name: str, system_prompt: str, api_key: str, is_routing: bool,
-                 tools: list[BaseTool], checkpointer: Optional[BaseCheckpointSaver[Any]] = None):
+                 tools: Sequence[BaseTool | Callable | dict[str, Any]],
+                 checkpointer: Optional[BaseCheckpointSaver[Any]] = None):
         response_format: type[AgentResponse]
         if is_routing:
             response_format = RoutingResponse
@@ -62,7 +63,7 @@ class StatusAgent[ResponseT: AgentResponse]:
 
     async def __call__(self, message: str, context_id: Optional[str] = None) -> ResponseT:
         config: RunnableConfig = RunnableConfig(configurable={'thread_id': context_id})
-        response = await self.agent.ainvoke(LangGraphMessage(message), config) # type: ignore[arg-type]
+        response = await self.agent.ainvoke(LangGraphMessage(message), config)  # type: ignore[arg-type]
         logging.info("agent response: %s", response)
         return response['structured_response']  # type: ignore[no-any-return]
 
