@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distributed_a2a"
-version = "0.1.14"
+version = "0.1.15"
 description = "A library for building A2A agents with routing capabilities"
 readme = "README.md"
 requires-python = ">=3.14"
