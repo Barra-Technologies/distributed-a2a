@@ -104,7 +104,7 @@ class RoutingAgentExecutor(AgentExecutor):
         else:
             logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
             artifact = new_text_artifact(name='current_result', description='Result of request to agent.',
-                                         text="*{self.agent_config.agent.card.name}*: {agent_response.response}")
+                                         text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}")
 
         # publish actual result
         await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
