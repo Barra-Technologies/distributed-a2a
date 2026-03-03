@@ -45,8 +45,9 @@ def get_agent_card(agent_config: AgentConfig) -> AgentCard:
         id=skill.id,
         name=skill.name,
         description=skill.description,
-        tags=skill.tags)
-        for skill in agent_config.agent.card.skills]
+        tags=skill.tags,
+        examples=skill.examples)
+    for skill in agent_config.agent.card.skills]
     skills.append(AgentSkill(
         id='routing',
         name='Agent routing',

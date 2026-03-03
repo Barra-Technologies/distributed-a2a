@@ -10,6 +10,7 @@ class SkillConfig(BaseModel):
     name: str = Field(description="The name of the skill e.g. weather")
     description: str = Field(description="A short description of the skill")
     tags: List[str] = Field(description="The tags associated with the skill")
+    examples: Optional[List[str]] = Field(description="Examples of how to use the skill", default=[])
 
 
 class RegistryItemConfig(BaseModel):

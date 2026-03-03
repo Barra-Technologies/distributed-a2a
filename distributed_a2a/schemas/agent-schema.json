@@ -97,6 +97,13 @@
                       "type": "string"
                     },
                     "description": "The tags associated with the skill"
+                  },
+                  "examples": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Example prompts associated with the skill"
                   }
                 },
                 "required": ["id", "name", "description", "tags"]
