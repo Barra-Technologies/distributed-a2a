@@ -38,9 +38,9 @@ def load_router(router_config: RouterConfig) -> FastAPI:
 
     executor = RoutingExecutor(
         router_config=router_config,
-        routing_tool=AgentRegistryLookup(
+        agent_registry=AgentRegistryLookup(
             agent_registry_url,
-            req_opts=req_opts).as_tool()
+            req_opts=req_opts)
     )
 
     return A2ARESTFastAPIApplication(
