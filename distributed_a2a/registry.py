@@ -135,7 +135,7 @@ class AgentRegistryLookup:
         Returns:
             A StructuredTool for looking up agent cards.
         """
-        return StructuredTool.from_function(func=lambda: self.get_agent_cards(), name="agent_lookup",
+        return StructuredTool.from_function(func=lambda: self.get_agents(), name="agent_lookup",
                                             description="Gets all available agents in the registry")
 
 
