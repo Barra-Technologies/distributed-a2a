@@ -60,6 +60,22 @@ class AgentRegistryLookup:
         response.raise_for_status()
         return cast(list[dict[str, Any]], response.json())
 
+    def get_agents(self) -> str:
+        """Retrieves all registered agents for the router.
+
+        Returns:
+            A list of agent details for the router.
+        """
+        agent_cards = self.get_agent_cards()
+        agent_cards_as_markdown =  "\n\n\n".join([self._extract_relevant_fields_for_router(card) for card in agent_cards])
+        logger.info(f"Agent cards: {agent_cards_as_markdown}")
+        return agent_cards_as_markdown
+
+    def _extract_relevant_fields_for_router(self, agent_card: dict[str, Any]) -> str:
+        overall_info = f"agent_name:{agent_card['name']} \nDescription: {agent_card['description']} \n"
+        skill_info = [f"## Skill: {skill['name']} \nDescription: {skill['description']} \nExamples: {skill['examples']}" for skill in agent_card['skills'] ]
+        return "# Agent:\n" + overall_info + "\n\n".join(skill_info)
+
     def get_agent_card(self, name: str) -> dict[str, Any] | None:
         """Retrieves a specific agent card by name.
 
@@ -119,8 +135,8 @@ class AgentRegistryLookup:
         Returns:
             A StructuredTool for looking up agent cards.
         """
-        return StructuredTool.from_function(func=lambda: self.get_agent_cards(), name="agent_card_lookup",
-                                            description="Gets all available agent cards")
+        return StructuredTool.from_function(func=lambda: self.get_agent_cards(), name="agent_lookup",
+                                            description="Gets all available agents in the registry")
 
 
 class McpRegistryLookup:
