@@ -1,4 +1,7 @@
-.PHONY: upload mypy
+.PHONY: upload mypy test
+
+test:
+	PYTHONPATH=. pytest
 
 bump-version:
 	@if [ -z "$(VERSION)" ]; then \
@@ -31,6 +34,3 @@ upload:
 
 mypy:
 	mypy .
-
-test:
-	pytest .
