@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 from uuid import uuid4
 
 import httpx
@@ -12,7 +11,7 @@ from a2a.types import (
 )
 from a2a.types import TaskState
 
-MAX_REQUESTS = 10
+MAX_REQUESTS = 50
 
 class RemoteAgentConnection:
     """A class to hold the connections to the remote agents."""
