@@ -11,7 +11,7 @@ from a2a.types import TaskState
 from distributed_a2a.client import RoutingA2AClient
 from distributed_a2a.registry_server.bootstrap import load_registry
 from distributed_a2a.registry_server.in_memory_registry_storage import InMemoryAgentRegistry, InMemoryMcpRegistry
-from tests.fake_agent import TestAgent
+from tests.fake_agent import FakeAgent
 from tests.fake_llm import get_llm_handler
 
 FINAL_RESPONSE = "Hello! This is a mock response from the fake OpenAI server."
@@ -55,7 +55,7 @@ def fake_registry_server():
 @pytest.mark.asyncio
 async def test_app_completed_path(fake_registry_server, fake_completed_llm):
     # Given
-    with TestAgent(fake_registry_server, fake_completed_llm, "test-agent") as agent:
+    with FakeAgent(fake_registry_server, fake_completed_llm, "test-agent") as agent:
         # When
         client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{agent.app_port}/{agent.name}")
         response = await client.send_message(message="Hello", context_id="test-context")
@@ -67,11 +67,11 @@ async def test_app_completed_path(fake_registry_server, fake_completed_llm):
 @pytest.mark.asyncio
 async def test_app_redirect_path(fake_registry_server, fake_completed_llm):
     # Given
-    with TestAgent(fake_registry_server, fake_completed_llm, "second-agent") as second_agent:
+    with FakeAgent(fake_registry_server, fake_completed_llm, "second-agent") as second_agent:
         # use the agent card of the second agent as the response message of the first agent
         card_response: str = second_agent.get_agent_card().model_dump_json()
         for llm_url in fake_llm_server(TaskState.rejected, card_response):
-            with TestAgent(fake_registry_server, llm_url, "redirect-agent") as first_agent:
+            with FakeAgent(fake_registry_server, llm_url, "redirect-agent") as first_agent:
                 client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{first_agent.app_port}/{first_agent.name}")
 
                 # When

@@ -12,7 +12,7 @@ from distributed_a2a.server import load_app, get_agent_card
 API_KEY_ENV_VAR = "FAKE_API_KEY"
 os.environ["FAKE_API_KEY"] = "fake-key"
 
-class TestAgent:
+class FakeAgent:
 
     def __init__(self, registry_url: str, llm_url: str, name: str):
         self._registry_url = registry_url
@@ -44,7 +44,7 @@ class TestAgent:
     def get_agent_card(self) -> AgentCard:
         return get_agent_card(self.config)
 
-    def __enter__(self) -> TestAgent:
+    def __enter__(self) -> FakeAgent:
         app = load_app(self.config)
 
         # Start the app server in a separate thread
