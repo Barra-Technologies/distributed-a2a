@@ -98,26 +98,33 @@ class RoutingAgentExecutor(AgentExecutor):
             agent_response: StringResponse = await self.agent(message=context.get_user_input(),
                                                               context_id=context.context_id)
 
-        artifact: Artifact
-        if agent_response.status == TaskState.rejected:
-            artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
-        else:
-            logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
-            artifact = new_text_artifact(name='current_result', description='Result of request to agent.',
-                                         text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}")
+            artifact: Artifact
+            if agent_response.status == TaskState.rejected:
+                artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
+            else:
+                logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
+                artifact = new_text_artifact(name='current_result', description='Result of request to agent.',
+                                             text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}")
 
-        # publish actual result
-        await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
-                                                                context_id=context.context_id,
-                                                                task_id=context.task_id,
-                                                                last_chunk=True,
-                                                                artifact=artifact))
-        # set and publish the final status
-        await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-            state=TaskState(agent_response.status)),
-            final=True,
-            context_id=context.context_id,
-            task_id=context.task_id))
+            # publish actual result
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
+                                                                    context_id=context.context_id,
+                                                                    task_id=context.task_id,
+                                                                    last_chunk=True,
+                                                                    artifact=artifact))
+            # set and publish the final status
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
+                state=TaskState(agent_response.status)),
+                final=True,
+                context_id=context.context_id,
+                task_id=context.task_id))
+        except Exception as e:
+            logger.error(f"Error executing agent task for context {context.context_id}: {e}",)
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(
+                status=TaskStatus(state=TaskState.failed),
+                final=True,
+                context_id=context.context_id,
+                task_id=context.task_id))
 
     async def reinitialize_agent_with_tools(self) -> None:
         mcp_server_raw = self.mcp_registry.get_mcp_tool_for_agent(self.agent_config.agent.card.name)
