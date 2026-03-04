@@ -31,3 +31,6 @@ upload:
 
 mypy:
 	mypy .
+
+test:
+	pytest .
