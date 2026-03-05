@@ -96,7 +96,7 @@ class RoutingA2AClient:
         self.initial_url = initial_url
         self.client = httpx.AsyncClient(headers=opts)
         self.current_card: AgentCard | None = None
-        self.rejected_agents = []
+        self.rejected_agents: list[str] = []
 
     async def fetch_initial_card(self) -> None:
         card_resolver = A2ACardResolver(

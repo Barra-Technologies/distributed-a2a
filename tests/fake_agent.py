@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 import uvicorn
+from a2a.server.agent_execution import AgentExecutor
 from a2a.types import AgentCard
 
 from distributed_a2a.model import AgentConfig, AgentItem, RegistryConfig, RegistryItemConfig, LLMConfig, CardConfig
@@ -16,6 +17,7 @@ os.environ["FAKE_API_KEY"] = "fake-key"
 
 
 class FakeAgent:
+    executor_overwrite: Optional[AgentExecutor] = None
 
     def __init__(self, registry_url: str, llm_url: str, name: str, routing: bool = True) -> None:
         self._registry_url = registry_url

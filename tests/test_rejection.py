@@ -2,6 +2,7 @@ import random
 import threading
 import time
 import os
+from typing import Generator, Any
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import pytest
 import uvicorn
@@ -18,11 +19,11 @@ from distributed_a2a.model import RouterConfig, RouterItem, CardConfig, LLMConfi
 
 FINAL_RESPONSE = "Hello! This is a mock response from the second agent."
 
-def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_requests: list):
+def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_requests: list[dict[str, Any]]) -> Generator[str, None, None]:
     port = random.randint(10000, 60000)
     
     class StatefulHandler(BaseHTTPRequestHandler):
-        def do_POST(self):
+        def do_POST(self) -> None:
             if self.path == '/v1/chat/completions':
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length).decode('utf-8')
@@ -43,16 +44,17 @@ def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_re
                 # noinspection PyTypeChecker
                 requested_tools: list[str] = [tool['function']['name'] for tool in request_body.get('tools', [])]
                 
+                tool_name: str
                 if RoutingResponse.__name__ in requested_tools:
                     arguments["agent_card"] = message
-                    tool: str = RoutingResponse.__name__
+                    tool_name = RoutingResponse.__name__
                 elif StringResponse.__name__ in requested_tools:
                     arguments["response"] = message
-                    tool: str = StringResponse.__name__
+                    tool_name = StringResponse.__name__
                 else:
                     # Default to StringResponse if not specified, though it should be one of them
                     arguments["response"] = message
-                    tool: str = StringResponse.__name__
+                    tool_name = StringResponse.__name__
 
                 response = {
                     "id": "chatcmpl-mock123",
@@ -66,7 +68,7 @@ def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_re
                                 "id": "call_123",
                                 "type": "function",
                                 "function": {
-                                    "name": tool,
+                                    "name": tool_name,
                                     "arguments": json.dumps(arguments)
                                 }
                             }]
@@ -88,7 +90,7 @@ def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_re
     thread.join(timeout=5)
 
 @pytest.fixture(scope="module")
-def fake_registry_server():
+def fake_registry_server() -> Generator[str, None, None]:
     port = 8083
     agent_registry = InMemoryAgentRegistry()
     mcp_registry = InMemoryMcpRegistry()
@@ -105,10 +107,10 @@ def fake_registry_server():
     thread.join(timeout=5)
 
 @pytest.mark.asyncio
-async def test_rejection_full_flow(fake_registry_server):
+async def test_rejection_full_flow(fake_registry_server: str) -> None:
     # This test verifies that RoutingA2AClient handles agent rejection by asking the router for another agent.
     
-    captured_requests = []
+    captured_requests: list[dict[str, Any]] = []
     
     # We need a sequence of responses for the stateful LLM server:
     # 1. Router: Return RejectingAgent card
@@ -117,7 +119,7 @@ async def test_rejection_full_flow(fake_registry_server):
     # 4. SuccessAgent: Return success message
     
     # These will be created inside the loop
-    responses = []
+    responses: list[tuple[TaskState, str]] = []
     
     for llm_url in fake_llm_server_stateful(responses, captured_requests):
         with FakeAgent(registry_url=fake_registry_server, llm_url=llm_url, name="rejecting-agent", routing=False) as rejecting_agent:
