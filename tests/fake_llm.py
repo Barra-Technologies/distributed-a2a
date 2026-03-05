@@ -31,7 +31,7 @@ def get_llm_handler(status: TaskState, message: str) -> type[BaseRequestHandler]
                 }
                 tool_name: str
                 if RoutingResponse.__name__ in requested_tools:
-                    arguments["agent_card"] = message
+                    arguments["agent_name"] = message
                     tool_name = RoutingResponse.__name__
                 elif StringResponse.__name__ in requested_tools:
                     arguments["response"] = message

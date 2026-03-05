@@ -2,7 +2,7 @@ from .client import RoutingA2AClient
 from .router import load_router
 from .server import load_app
 from .registry_server import load_registry, InMemoryMcpRegistry, InMemoryAgentRegistry
-from .registry import registry_heart_beat, AgentRegistryLookup as AgentRegistryClient, \
+from .registry import registry_heart_beat, AgentRegistryLookupClient as AgentRegistryClient, \
     McpRegistryLookup as McpRegistryClient
 from .model import AgentConfig, SkillConfig, RegistryItemConfig, RegistryConfig, LLMConfig, CardConfig, AgentItem, \
     RouterItem, RouterConfig

@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 from uuid import uuid4
 
 import httpx
@@ -13,6 +12,7 @@ from a2a.types import (
 from a2a.types import TaskState
 
 MAX_REQUESTS = 50
+
 
 class RemoteAgentConnection:
     """A class to hold the connections to the remote agents."""
@@ -53,7 +53,7 @@ class RemoteAgentConnection:
         return response
 
     async def send_message(self, message_to_send: str, context_id: str, task_id: None | str = None,
-                           count: int = 0) -> str | AgentCard :
+                           count: int = 0) -> str | AgentCard:
         message: Message = create_text_message_object(content=message_to_send)
         message.message_id = str(uuid4())
         message.context_id = context_id
@@ -67,7 +67,7 @@ class RemoteAgentConnection:
         task_state = response.status.state
         if task_state == TaskState.working or task_state == TaskState.submitted:
             if count < MAX_REQUESTS:
-                await asyncio.sleep(round(pow(1.05,count)))
+                await asyncio.sleep(round(pow(1.05, count)))
                 return await self.send_message(message_to_send, context_id, response.id, count + 1)
             else:
                 raise Exception("Timeout waiting for agent to respond")
@@ -90,7 +90,7 @@ MAX_RECURSION_DEPTH = 10
 
 
 class RoutingA2AClient:
-    def __init__(self, initial_url: str, opts: dict[str,str] | None = None):
+    def __init__(self, initial_url: str, opts: dict[str, str] | None = None):
         self.initial_url = initial_url
         self.client = httpx.AsyncClient(headers=opts)
         self.current_card: AgentCard | None = None
@@ -114,7 +114,7 @@ class RoutingA2AClient:
 
         agent_connection = RemoteAgentConnection(self.current_card, self.client)
 
-        agent_response: str | AgentCard  = await agent_connection.send_message(message, context_id)
+        agent_response: str | AgentCard = await agent_connection.send_message(message, context_id)
         if isinstance(agent_response, AgentCard):
             self.current_card = agent_response
             return await self.send_message(message, context_id, depth + 1)

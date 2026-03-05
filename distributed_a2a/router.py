@@ -1,5 +1,3 @@
-import os
-
 from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
@@ -9,7 +7,7 @@ from fastapi import FastAPI
 from .executors import RoutingExecutor
 from .config import settings
 from .model import RouterConfig
-from .registry import AgentRegistryLookup
+from .registry import AgentRegistryLookupClient
 from .server import CAPABILITIES
 
 
@@ -38,9 +36,9 @@ def load_router(router_config: RouterConfig) -> FastAPI:
 
     executor = RoutingExecutor(
         router_config=router_config,
-        routing_tool=AgentRegistryLookup(
+        agent_registry=AgentRegistryLookupClient(
             agent_registry_url,
-            req_opts=req_opts).as_tool()
+            req_opts=req_opts)
     )
 
 
