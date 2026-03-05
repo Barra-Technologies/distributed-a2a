@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from uuid import uuid4
 
 import httpx

@@ -1,3 +1,5 @@
+from typing import Any
+
 import json
 from http.server import BaseHTTPRequestHandler
 from socketserver import BaseRequestHandler
@@ -11,12 +13,12 @@ def get_llm_handler(status: TaskState, message: str) -> type[BaseRequestHandler]
     class FakeOpenAIHandler(BaseHTTPRequestHandler):
 
         # noinspection PyPep8Naming
-        def do_POST(self):
+        def do_POST(self) -> None:
             if self.path == '/v1/chat/completions':
                 content_length = int(self.headers.get('Content-Length', 0))
                 if content_length == 0:
                     raise ValueError("No request body provided")
-                request_body: dict = json.loads(self.rfile.read(content_length).decode('utf-8'))
+                request_body: dict[str, Any] = json.loads(self.rfile.read(content_length).decode('utf-8'))
 
                 # noinspection PyTypeChecker
                 requested_tools: list[str] = [tool['function']['name'] for tool in request_body['tools']]
@@ -27,12 +29,13 @@ def get_llm_handler(status: TaskState, message: str) -> type[BaseRequestHandler]
                 arguments = {
                     "status": status.name,
                 }
+                tool_name: str
                 if RoutingResponse.__name__ in requested_tools:
                     arguments["agent_card"] = message
-                    tool: str = RoutingResponse.__name__
+                    tool_name = RoutingResponse.__name__
                 elif StringResponse.__name__ in requested_tools:
                     arguments["response"] = message
-                    tool: str = StringResponse.__name__
+                    tool_name = StringResponse.__name__
                 else:
                     raise ValueError(f"Unknown tools requested: {requested_tools}")
 
@@ -50,7 +53,7 @@ def get_llm_handler(status: TaskState, message: str) -> type[BaseRequestHandler]
                                 "id": "call_123",
                                 "type": "function",
                                 "function": {
-                                    "name": tool,
+                                    "name": tool_name,
                                     "arguments": json.dumps(arguments)
                                 }
                             }]

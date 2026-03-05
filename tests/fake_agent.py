@@ -1,3 +1,5 @@
+from typing import Any
+
 import os
 import random
 import threading
@@ -14,7 +16,7 @@ os.environ["FAKE_API_KEY"] = "fake-key"
 
 class FakeAgent:
 
-    def __init__(self, registry_url: str, llm_url: str, name: str):
+    def __init__(self, registry_url: str, llm_url: str, name: str) -> None:
         self._registry_url = registry_url
         self._llm_url = llm_url
         self.name = name
@@ -55,6 +57,6 @@ class FakeAgent:
         time.sleep(2)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self._app_server.should_exit = True
         self._app_thread.join(timeout=5)

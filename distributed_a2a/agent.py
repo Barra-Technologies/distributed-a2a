@@ -64,7 +64,7 @@ class StatusAgent[ResponseT: AgentResponse]:
         config: RunnableConfig = RunnableConfig(configurable={'thread_id': context_id})
         response = await self.agent.ainvoke(LangGraphMessage(message), config) # type: ignore[arg-type]
         logging.info("agent response: %s", response)
-        return response['structured_response']  # type: ignore[no-any-return]
+        return response['structured_response']  # type: ignore
 
 
 class LangGraphMessage(BaseModel):
