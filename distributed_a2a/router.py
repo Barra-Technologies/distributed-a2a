@@ -43,6 +43,11 @@ def load_router(router_config: RouterConfig) -> FastAPI:
             req_opts=req_opts).as_tool()
     )
 
+
+    root_path = settings.api_root_path or f"/{router_config.router.card.name.replace(" ", "_").lower()}"
+    if root_path == "/":
+        root_path = ""
+
     return A2ARESTFastAPIApplication(
         agent_card=agent_card,
         http_handler=DefaultRequestHandler(
@@ -50,4 +55,4 @@ def load_router(router_config: RouterConfig) -> FastAPI:
             task_store=InMemoryTaskStore()  # TODO replace with dynamodb store
 
         )).build(title=agent_card.name,
-                 root_path=f"/{router_config.router.card.name}")
+                 root_path=f"/{router_config.router.card.name.replace(" ", "_").lower()}")

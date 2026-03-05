@@ -89,7 +89,7 @@ def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheck
         yield
 
 
-    root_path = settings.api_root_path or f"/{agent_config.agent.card.name}"
+    root_path = settings.api_root_path or f"/{agent_config.agent.card.name.replace(' ', '_').lower()}"
     if root_path == "/":
         root_path = ""
 
