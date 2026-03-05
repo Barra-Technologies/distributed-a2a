@@ -96,12 +96,8 @@ class RoutingAgentExecutor(AgentExecutor):
                                                                   final=False,
                                                                   context_id=context.context_id,
                                                                   task_id=context.task_id))
-
-            user_input = context.get_user_input()
-
             await self.reinitialize_agent_with_tools()
-
-            agent_response: StringResponse = await self.agent(message=user_input,
+            agent_response: StringResponse = await self.agent(message=context.get_user_input(),
                                                               context_id=context.context_id)
 
             artifact: Artifact
