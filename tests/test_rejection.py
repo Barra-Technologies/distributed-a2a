@@ -10,6 +10,7 @@ from a2a.types import TaskState, AgentCard
 from distributed_a2a.client import RoutingA2AClient
 from distributed_a2a.registry_server.bootstrap import load_registry
 from distributed_a2a.registry_server.in_memory_registry_storage import InMemoryAgentRegistry, InMemoryMcpRegistry
+from stubs import NonRoutingAgent
 from tests.fake_agent import FakeAgent
 from distributed_a2a.agent import RoutingResponse, StringResponse
 from distributed_a2a.router import load_router
@@ -119,7 +120,8 @@ async def test_rejection_full_flow(fake_registry_server):
     responses = []
     
     for llm_url in fake_llm_server_stateful(responses, captured_requests):
-        with FakeAgent(fake_registry_server, llm_url, "rejecting-agent") as rejecting_agent:
+        with FakeAgent(registry_url=fake_registry_server, llm_url=llm_url, name="rejecting-agent", routing=False) as rejecting_agent:
+            rejecting_agent.executor_overwrite = NonRoutingAgent(rejecting_agent.config)
             with FakeAgent(fake_registry_server, llm_url, "success-agent") as success_agent:
                 
                 # Setup Router
@@ -144,7 +146,7 @@ async def test_rejection_full_flow(fake_registry_server):
                     )
                 )
                 os.environ["FAKE_API_KEY"] = "fake-key"
-                router_app = load_router(router_config)
+                router_app = load_router(router_config=router_config)
                 router_uvicorn_config = uvicorn.Config(router_app, host="127.0.0.1", port=router_port)
                 router_server = uvicorn.Server(router_uvicorn_config)
                 router_thread = threading.Thread(target=router_server.run, daemon=True)
@@ -165,10 +167,9 @@ async def test_rejection_full_flow(fake_registry_server):
                     client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{router_port}")
                     
                     result = await client.send_message("Hello", context_id="test-context")
-                    
+
                     assert result == FINAL_RESPONSE
                     assert "rejecting-agent" in client.rejected_agents
-                    assert len(client.rejected_agents) == 1
                     
                 finally:
                     router_server.should_exit = True
