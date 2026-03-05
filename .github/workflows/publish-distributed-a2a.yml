@@ -50,9 +50,9 @@ jobs:
       if: "contains(github.ref, 'main')"
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements-ci.txt
-        pip install -r requirements.txt
-        make mypy
+        pip install -e ".[ci]"
+        pip install -e "."
+        make bump-patch
         NEW_VERSION=$(toml get --toml-path pyproject.toml project.version)
         echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
@@ -61,9 +61,8 @@ jobs:
       if: "!contains(github.ref, 'main')"
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements-ci.txt
-        pip install -r requirements.txt
-        make mypy
+        pip install -e ".[ci]"
+        pip install -e "."
         NEW_VERSION=$(toml get --toml-path pyproject.toml project.version)
         echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
