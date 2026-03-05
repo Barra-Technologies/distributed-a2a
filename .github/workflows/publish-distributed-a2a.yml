@@ -27,7 +27,7 @@ jobs:
 
     - name: Run tests
       run: |
-        pytest
+        make test
 
   build-n-publish:
     name: Build and publish Python 🐍 distribution 📦 to PyPI
