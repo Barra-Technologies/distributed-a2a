@@ -14,7 +14,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from .agent import StatusAgent, RoutingResponse, StringResponse
 from .config import settings
 from .model import AgentConfig, RouterConfig
-from .registry import McpRegistryLookup, AgentRegistryLookup
+from .registry import McpRegistryLookup, AgentRegistryLookupClient
 
 logger: Logger = logging.getLogger(__name__)
 
@@ -38,7 +38,8 @@ Your main task is to:
 
 class RoutingAgentExecutor(AgentExecutor):
 
-    def __init__(self, agent_config: AgentConfig, agent_registry: AgentRegistryLookup, tools: list[BaseTool] | None = None,
+    def __init__(self, agent_config: AgentConfig, agent_registry: AgentRegistryLookupClient,
+                 tools: list[BaseTool] | None = None,
                  routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None,
                  specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None):
         super().__init__()
@@ -119,7 +120,7 @@ class RoutingAgentExecutor(AgentExecutor):
                 context_id=context.context_id,
                 task_id=context.task_id))
         except Exception as e:
-            logger.error(f"Error executing agent task for context {context.context_id}: {e}",)
+            logger.error(f"Error executing agent task for context {context.context_id}: {e}", )
             await event_queue.enqueue_event(TaskStatusUpdateEvent(
                 status=TaskStatus(state=TaskState.failed),
                 final=True,
@@ -134,7 +135,8 @@ class RoutingAgentExecutor(AgentExecutor):
 
         logger.info(f"Agent {self.agent_config.agent.card.name} has access to the following tools: {mcp_server_raw}")
         mcp_servers = {tool["name"]: {"url": tool["url"], "transport": tool["protocol"],
-                                "headers": settings.get_mcp_auth_headers(tool["name"])} for tool in mcp_server_raw}
+                                      "headers": settings.get_mcp_auth_headers(tool["name"])} for tool in
+                       mcp_server_raw}
         mcp_client = MultiServerMCPClient(mcp_servers)  # type: ignore[arg-type]
         mcp_tools = await mcp_client.get_tools()
 
@@ -149,7 +151,7 @@ class RoutingAgentExecutor(AgentExecutor):
 
 
 class RoutingExecutor(AgentExecutor):
-    def __init__(self, router_config: RouterConfig, agent_registry: AgentRegistryLookup) -> None:
+    def __init__(self, router_config: RouterConfig, agent_registry: AgentRegistryLookupClient) -> None:
         super().__init__()
         api_key = settings.get_env_var(router_config.router.llm.api_key_env)
         if api_key is None:
@@ -171,39 +173,47 @@ class RoutingExecutor(AgentExecutor):
         if context.context_id is None or context.task_id is None:
             raise ValueError("Context ID and Task ID must be provided.")
 
-        await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(state=TaskState.working),
-                                                              final=False,
-                                                              context_id=context.context_id,
-                                                              task_id=context.task_id))
+        try:
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(state=TaskState.working),
+                                                                  final=False,
+                                                                  context_id=context.context_id,
+                                                                  task_id=context.task_id))
 
-        artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
+            artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
 
-        # publish actual result
-        await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
-                                                                context_id=context.context_id,
-                                                                task_id=context.task_id,
-                                                                last_chunk=True,
-                                                                artifact=artifact))
-        # set and publish the final status
-        await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-            state=TaskState.completed),
-            final=True,
-            context_id=context.context_id,
-            task_id=context.task_id))
+            # publish actual result
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
+                                                                    context_id=context.context_id,
+                                                                    task_id=context.task_id,
+                                                                    last_chunk=True,
+                                                                    artifact=artifact))
+            # set and publish the final status
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
+                state=TaskState.completed),
+                final=True,
+                context_id=context.context_id,
+                task_id=context.task_id))
+        except Exception as e:
+            logger.error(f"Error executing agent task for context {context.context_id}: {e}")
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
+                state=TaskState.failed),
+                final=True,
+                context_id=context.context_id,
+                task_id=context.task_id))
 
 
-async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingResponse], agent_registry: AgentRegistryLookup, context: RequestContext) -> Artifact:
+async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingResponse],
+                                           agent_registry: AgentRegistryLookupClient,
+                                           context: RequestContext) -> Artifact:
     routing_agent_response: RoutingResponse = await routing_agent(message=context.get_user_input(),
                                                                   context_id=context.context_id)
     agent_name: str = routing_agent_response.agent_name
     if agent_name is None:
-        logger.error(f"Failed to identify agent name")
-        raise
+        raise ValueError("LLM returned a None agent")
     logger.info(f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.")
     agent_card: dict[str, Any] | None = agent_registry.get_agent_card(agent_name)
     if agent_card is None:
-        logger.error(f"agent not found  for name: {agent_name}")
-        raise
+        raise ValueError(f"agent not found for name: {agent_name}")
     logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
     artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
                                  text=json.dumps(agent_card))

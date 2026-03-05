@@ -69,10 +69,9 @@ async def test_app_redirect_path(fake_registry_server: str, fake_completed_llm: 
     # Given
     with FakeAgent(fake_registry_server, fake_completed_llm, "second-agent") as second_agent:
         # use the agent card of the second agent as the response message of the first agent
-        card_response: str = second_agent.get_agent_card().model_dump_json()
-        for llm_url in fake_llm_server(TaskState.rejected, card_response):
+        for llm_url in fake_llm_server(TaskState.rejected, second_agent.name):
             with FakeAgent(fake_registry_server, llm_url, "redirect-agent") as first_agent:
-                client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{first_agent.app_port}/{first_agent.name}")
+                client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{first_agent.app_port}")
 
                 # When
                 response = await client.send_message(message="Hello", context_id="test-context")

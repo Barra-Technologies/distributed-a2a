@@ -1,9 +1,8 @@
-from typing import Any
-
 import os
 import random
 import threading
 import time
+from typing import Any
 
 import uvicorn
 from a2a.types import AgentCard
@@ -13,6 +12,7 @@ from distributed_a2a.server import load_app, get_agent_card
 
 API_KEY_ENV_VAR = "FAKE_API_KEY"
 os.environ["FAKE_API_KEY"] = "fake-key"
+
 
 class FakeAgent:
 
@@ -31,7 +31,7 @@ class FakeAgent:
                     name=self.name,
                     description="A test agent",
                     version="1.0.0",
-                    url=f"http://127.0.0.1:{self.app_port}/{self.name}",
+                    url=f"http://127.0.0.1:{self.app_port}",
                     skills=[]
                 ),
                 llm=LLMConfig(

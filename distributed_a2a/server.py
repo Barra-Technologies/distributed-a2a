@@ -1,4 +1,3 @@
-import os
 import asyncio
 import time
 from contextlib import asynccontextmanager
@@ -13,10 +12,10 @@ from a2a.types import AgentSkill, \
 from fastapi import FastAPI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from .executors import RoutingAgentExecutor
 from .config import settings
+from .executors import RoutingAgentExecutor
 from .model import AgentConfig
-from .registry import registry_heart_beat, AgentRegistryLookup
+from .registry import registry_heart_beat, AgentRegistryLookupClient
 
 CAPABILITIES = AgentCapabilities(streaming=False, push_notifications=False)
 
@@ -75,7 +74,7 @@ def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheck
     agent_registry_url = ""
     if agent_config.agent.registry and agent_config.agent.registry.agent:
         agent_registry_url = agent_config.agent.registry.agent.url
-    agent_registry = AgentRegistryLookup(agent_registry_url, req_opts=req_opts)
+    agent_registry = AgentRegistryLookupClient(agent_registry_url, req_opts=req_opts)
     executor = RoutingAgentExecutor(agent_config=agent_config,
                                     agent_registry=agent_registry,
                                     routing_checkpointer=routing_checkpointer,

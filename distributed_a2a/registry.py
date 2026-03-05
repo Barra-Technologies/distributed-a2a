@@ -1,11 +1,11 @@
 """Registry lookup for agents and MCP servers."""
 import asyncio
-import os
 import logging
 from typing import Callable, Any, cast
+
 import httpx
-from langchain_core.tools import StructuredTool
 from a2a.types import AgentCard
+from langchain_core.tools import StructuredTool
 
 from .config import settings
 
@@ -15,7 +15,8 @@ if settings.httpx_logging:
     logging.getLogger("httpx").setLevel(logging.DEBUG)
 
 
-async def registry_heart_beat(name: str, registry: 'AgentRegistryLookup', agent_card: AgentCard, interval_sec: int,
+async def registry_heart_beat(name: str, registry: 'AgentRegistryLookupClient', agent_card: AgentCard,
+                              interval_sec: int,
                               get_expire_at: Callable[[], int]) -> None:
     """Periodically sends heartbeats to the registry to keep the agent registration alive.
 
@@ -35,10 +36,10 @@ async def registry_heart_beat(name: str, registry: 'AgentRegistryLookup', agent_
         await asyncio.sleep(interval_sec)
 
 
-class AgentRegistryLookup:
+class AgentRegistryLookupClient:
     """Client for looking up agent information in the registry."""
 
-    def __init__(self, registry_url: str, req_opts: dict[str,str] = {}):
+    def __init__(self, registry_url: str, req_opts: dict[str, str] = {}):
         """Initializes the AgentRegistryLookup client.
 
         Args:
@@ -67,13 +68,15 @@ class AgentRegistryLookup:
             A list of agent details for the router.
         """
         agent_cards = self.get_agent_cards()
-        agent_cards_as_markdown =  "\n\n\n".join([self._extract_relevant_fields_for_router(card) for card in agent_cards])
+        agent_cards_as_markdown = "\n\n\n".join(
+            [self._extract_relevant_fields_for_router(card) for card in agent_cards])
         logger.info(f"Agent cards: {agent_cards_as_markdown}")
         return agent_cards_as_markdown
 
     def _extract_relevant_fields_for_router(self, agent_card: dict[str, Any]) -> str:
         overall_info = f"agent_name:{agent_card['name']} \nDescription: {agent_card['description']} \n"
-        skill_info = [f"## Skill: {skill['name']} \nDescription: {skill['description']} \nExamples: {skill['examples']}" for skill in agent_card['skills'] ]
+        skill_info = [f"## Skill: {skill['name']} \nDescription: {skill['description']} \nExamples: {skill['examples']}"
+                      for skill in agent_card['skills']]
         return "# Agent:\n" + overall_info + "\n\n".join(skill_info)
 
     def get_agent_card(self, name: str) -> dict[str, Any] | None:
@@ -126,7 +129,8 @@ class AgentRegistryLookup:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error during patch_agent_expiry: {e} with response: {response.text if response.text else '<empty>'}")
+            logger.error(
+                f"HTTP error during patch_agent_expiry: {e} with response: {response.text if response.text else '<empty>'}")
             raise e
 
     def as_tool(self) -> StructuredTool:
