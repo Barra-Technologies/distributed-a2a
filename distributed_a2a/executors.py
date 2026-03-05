@@ -33,6 +33,7 @@ Your main task is to:
 - If the user query is relevant to multiple agents, return the agent_name of the agent with the highest match.
 - If the user query is not relevant to any agent, return the agent_name of the generic agent.
 - If no generic agent is available, return an error message.
+- If the user provides a list of rejected or excluded agents, DO NOT route to any agent in that list. Use the `exclude_agents` parameter in your lookup tool to filter them out.
 """
 
 
@@ -95,8 +96,12 @@ class RoutingAgentExecutor(AgentExecutor):
                                                                   final=False,
                                                                   context_id=context.context_id,
                                                                   task_id=context.task_id))
+
+            user_input = context.get_user_input()
+
             await self.reinitialize_agent_with_tools()
-            agent_response: StringResponse = await self.agent(message=context.get_user_input(),
+
+            agent_response: StringResponse = await self.agent(message=user_input,
                                                               context_id=context.context_id)
 
             artifact: Artifact
@@ -193,6 +198,7 @@ class RoutingExecutor(AgentExecutor):
                 final=True,
                 context_id=context.context_id,
                 task_id=context.task_id))
+
         except Exception as e:
             logger.error(f"Error executing agent task for context {context.context_id}: {e}")
             await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
@@ -205,6 +211,7 @@ class RoutingExecutor(AgentExecutor):
 async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingResponse],
                                            agent_registry: AgentRegistryLookupClient,
                                            context: RequestContext) -> Artifact:
+
     routing_agent_response: RoutingResponse = await routing_agent(message=context.get_user_input(),
                                                                   context_id=context.context_id)
     agent_name: str = routing_agent_response.agent_name
