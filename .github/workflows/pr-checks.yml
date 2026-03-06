@@ -75,7 +75,6 @@ jobs:
         with:
           commit_message: "Bump version to ${{ steps.bump.outputs.version }}"
           tag_name: 'v${{steps.bump.outputs.version}}'
-          branch: main
           file_pattern: pyproject.toml
 
       - name: Comment on PR with new version
