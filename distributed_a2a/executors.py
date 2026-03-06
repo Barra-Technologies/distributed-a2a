@@ -240,15 +240,15 @@ class RoutingExecutor(AgentExecutor):
 async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingResponse],
                                            agent_registry: AgentRegistryLookupClient,
                                            context: RequestContext) -> Artifact:
-    routing_agent_response: RoutingResponse | str = await routing_agent(message=context.get_user_input(),
+    routing_agent_response: RoutingResponse = await routing_agent(message=context.get_user_input(),
                                                                   context_id=context.context_id)
-    agent_name: str = routing_agent_response.agent_name
+    agent_name: str | None = routing_agent_response.agent_name
     if agent_name is None:
-        raise RoutingFailed(message=routing_agent_response)
+        raise RoutingFailed(message=str(routing_agent_response))
     logger.info(f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.")
     agent_card: dict[str, Any] | None = agent_registry.get_agent_card(agent_name)
     if agent_card is None:
-        raise RoutingFailed(message=routing_agent_response)
+        raise RoutingFailed(message=str(routing_agent_response))
     logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
     artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
                                  text=json.dumps(agent_card))
