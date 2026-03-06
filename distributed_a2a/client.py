@@ -17,7 +17,7 @@ MAX_REQUESTS = 50
 class RemoteAgentConnection:
     """A class to hold the connections to the remote agents."""
 
-    def __init__(self, agent_card: AgentCard, client: httpx.AsyncClient, ):
+    def __init__(self, agent_card: AgentCard, client: httpx.AsyncClient):
         if agent_card.preferred_transport is None:
             raise ValueError("Agent card preferred transport must be provided.")
         if agent_card.capabilities.streaming is None:
@@ -53,7 +53,7 @@ class RemoteAgentConnection:
         return response
 
     async def send_message(self, message_to_send: str, context_id: str, task_id: None | str = None,
-                           count: int = 0) -> str | AgentCard| TaskState:
+                           count: int = 0) -> str | AgentCard | TaskState:
         message: Message = create_text_message_object(content=message_to_send)
         message.message_id = str(uuid4())
         message.context_id = context_id
@@ -105,7 +105,8 @@ class RoutingA2AClient:
             await card_resolver.get_agent_card()
         )
 
-    async def send_message(self, message: str, context_id: str, depth: int = 0, rejected_agents: list[str] | None = None) -> str:
+    async def send_message(self, message: str, context_id: str, depth: int = 0,
+                           rejected_agents: list[str] | None = None) -> str:
         if depth > MAX_RECURSION_DEPTH:
             raise Exception("Maximum recursion depth exceeded. This is likely due to an infinite loop in your agent.")
 
@@ -127,7 +128,7 @@ class RoutingA2AClient:
             rejection_msg = f"Please exclude the following agents from routing: {', '.join(sorted(set(rejected_agents)))}"
             if rejection_msg not in message:
                 message_to_send = f"{message}\n\n{rejection_msg}"
-        
+
         agent_response: str | AgentCard | TaskState = await agent_connection.send_message(message_to_send, context_id)
         if isinstance(agent_response, AgentCard):
             if agent_response.url == self.current_card.url:
@@ -139,7 +140,8 @@ class RoutingA2AClient:
 
         if agent_response == TaskState.rejected:
             if self.current_card.name in rejected_agents:
-                raise Exception(f"Agent {self.current_card.name} rejected the request again after being already in the rejected list.")
+                raise Exception(
+                    f"Agent {self.current_card.name} rejected the request again after being already in the rejected list.")
             rejected_agents.append(self.current_card.name)
             await self.fetch_initial_card()
             return await self.send_message(message, context_id, depth + 1, rejected_agents)
