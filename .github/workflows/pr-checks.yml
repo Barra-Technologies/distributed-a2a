@@ -1,11 +1,16 @@
 name: PR Checks
 
 on:
+  push:
   pull_request:
     branches:
       - main
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -43,8 +48,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
           fetch-depth: 0
+
+      - name: Find PR number
+        id: pr
+        uses: jwalton/gh-find-current-pr@89ee5799558265a1e0e31fab792ebb4ee91c016b
+        with:
+          state: open
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6
@@ -78,10 +89,11 @@ jobs:
           file_pattern: pyproject.toml
 
       - name: Comment on PR with new version
+        if: steps.pr.outputs.number != ''
         uses: thollander/actions-comment-pull-request@v2
         with:
           message: |
             New version: ${{ steps.bump.outputs.version }} 🚀
           comment_tag: new-version
-          pr_number: ${{ github.event.pull_request.number }}
+          pr_number: ${{ steps.pr.outputs.number }}
 
