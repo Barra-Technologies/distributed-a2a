@@ -2,7 +2,7 @@ import os
 import random
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
 import uvicorn
 from a2a.server.agent_execution import AgentExecutor

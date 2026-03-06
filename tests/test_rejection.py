@@ -3,7 +3,7 @@ import threading
 import time
 import os
 import json
-from typing import Generator, Any
+from typing import Generator, Any, Callable
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import pytest
 import uvicorn
@@ -125,9 +125,9 @@ def fake_registry_server() -> Generator[str, None, None]:
     thread.join(timeout=2)
 
 @pytest.fixture
-def router_server_factory(fake_registry_server, fake_llm_server):
+def router_server_factory(fake_registry_server: str, fake_llm_server: str) -> Generator[Callable[[int], str], None, None]:
     servers = []
-    def _run_router(port):
+    def _run_router(port: int) -> str:
         router_config = RouterConfig(
             router=RouterItem(
                 registry=RegistryConfig(agent=RegistryItemConfig(url=fake_registry_server)),
@@ -161,7 +161,7 @@ def router_server_factory(fake_registry_server, fake_llm_server):
         thread.join(timeout=2)
 
 @pytest.mark.asyncio
-async def test_rejection_full_flow(fake_registry_server, fake_llm_server, llm_responses, router_server_factory) -> None:
+async def test_rejection_full_flow(fake_registry_server: str, fake_llm_server: str, llm_responses: list[tuple[TaskState, str]], router_server_factory: Callable[[int], str]) -> None:
     with FakeAgent(registry_url=fake_registry_server, llm_url=fake_llm_server, name="rejecting-agent", routing=False) as rejecting_agent:
         with FakeAgent(fake_registry_server, fake_llm_server, "success-agent") as success_agent:
             router_port = random.randint(10000, 60000)
@@ -179,7 +179,7 @@ async def test_rejection_full_flow(fake_registry_server, fake_llm_server, llm_re
             assert FINAL_RESPONSE in result
 
 @pytest.mark.asyncio
-async def test_rejection_reset_between_calls(fake_registry_server, fake_llm_server, llm_responses, captured_requests, router_server_factory) -> None:
+async def test_rejection_reset_between_calls(fake_registry_server: str, fake_llm_server: str, llm_responses: list[tuple[TaskState, str]], captured_requests: list[Any], router_server_factory: Callable[[int], str]) -> None:
     with FakeAgent(registry_url=fake_registry_server, llm_url=fake_llm_server, name="rejecting-agent", routing=False) as rejecting_agent:
         with FakeAgent(fake_registry_server, fake_llm_server, "success-agent") as success_agent:
             router_port = random.randint(10000, 60000)
