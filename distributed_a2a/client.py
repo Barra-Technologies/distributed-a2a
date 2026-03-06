@@ -96,7 +96,6 @@ class RoutingA2AClient:
         self.initial_url = initial_url
         self.client = httpx.AsyncClient(headers=opts)
         self.current_card: AgentCard | None = None
-        self.rejected_agents: list[str] = []
 
     async def fetch_initial_card(self) -> None:
         card_resolver = A2ACardResolver(
@@ -106,9 +105,13 @@ class RoutingA2AClient:
             await card_resolver.get_agent_card()
         )
 
-    async def send_message(self, message: str, context_id: str, depth: int = 0) -> str:
+    async def send_message(self, message: str, context_id: str, depth: int = 0, rejected_agents: list[str] | None = None) -> str:
         if depth > MAX_RECURSION_DEPTH:
             raise Exception("Maximum recursion depth exceeded. This is likely due to an infinite loop in your agent.")
+
+        if rejected_agents is None:
+            rejected_agents = []
+
         if self.current_card is None:
             await self.fetch_initial_card()
 
@@ -118,27 +121,27 @@ class RoutingA2AClient:
         agent_connection = RemoteAgentConnection(self.current_card, self.client)
 
         message_to_send = message
-        if self.rejected_agents:
+        if rejected_agents:
             # Check if rejection instruction is already in the message to avoid multiple appends
             # Use set and sorted for deterministic output
-            rejection_msg = f"Please exclude the following agents from routing: {', '.join(sorted(set(self.rejected_agents)))}"
+            rejection_msg = f"Please exclude the following agents from routing: {', '.join(sorted(set(rejected_agents)))}"
             if rejection_msg not in message:
                 message_to_send = f"{message}\n\n{rejection_msg}"
-
+        
         agent_response: str | AgentCard | TaskState = await agent_connection.send_message(message_to_send, context_id)
         if isinstance(agent_response, AgentCard):
             if agent_response.url == self.current_card.url:
                 raise Exception("Agent redirected to itself.")
-            if agent_response.name in self.rejected_agents:
+            if agent_response.name in rejected_agents:
                 raise Exception(f"Agent {agent_response.name} was already rejected but was redirected to again.")
             self.current_card = agent_response
-            return await self.send_message(message, context_id, depth + 1)
+            return await self.send_message(message, context_id, depth + 1, rejected_agents)
 
         if agent_response == TaskState.rejected:
-            if self.current_card.name in self.rejected_agents:
+            if self.current_card.name in rejected_agents:
                 raise Exception(f"Agent {self.current_card.name} rejected the request again after being already in the rejected list.")
-            self.rejected_agents.append(self.current_card.name)
+            rejected_agents.append(self.current_card.name)
             await self.fetch_initial_card()
-            return await self.send_message(message, context_id, depth + 1)
+            return await self.send_message(message, context_id, depth + 1, rejected_agents)
 
         return agent_response

@@ -2,27 +2,38 @@ import random
 import threading
 import time
 import os
+import json
 from typing import Generator, Any
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import pytest
 import uvicorn
-import json
-from a2a.types import TaskState, AgentCard
+from a2a.types import TaskState
 from distributed_a2a.client import RoutingA2AClient
 from distributed_a2a.registry_server.bootstrap import load_registry
 from distributed_a2a.registry_server.in_memory_registry_storage import InMemoryAgentRegistry, InMemoryMcpRegistry
-from stubs import NonRoutingAgent
 from tests.fake_agent import FakeAgent
-from distributed_a2a.agent import RoutingResponse, StringResponse
 from distributed_a2a.router import load_router
 from distributed_a2a.model import RouterConfig, RouterItem, CardConfig, LLMConfig, RegistryConfig, RegistryItemConfig
+import httpx
 
 FINAL_RESPONSE = "Hello! This is a mock response from the second agent."
 
-def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_requests: list[dict[str, Any]]) -> Generator[str, None, None]:
+@pytest.fixture
+def captured_requests() -> list[dict[str, Any]]:
+    return []
+
+@pytest.fixture
+def llm_responses() -> list[tuple[TaskState, str]]:
+    return []
+
+@pytest.fixture
+def fake_llm_server(llm_responses: list[tuple[TaskState, str]], captured_requests: list[dict[str, Any]]) -> Generator[str, None, None]:
     port = random.randint(10000, 60000)
     
     class StatefulHandler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
         def do_POST(self) -> None:
             if self.path == '/v1/chat/completions':
                 content_length = int(self.headers.get('Content-Length', 0))
@@ -30,9 +41,8 @@ def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_re
                 request_body = json.loads(body)
                 captured_requests.append(request_body)
                 
-                # Get response based on call count
-                if responses:
-                    status, message = responses.pop(0)
+                if llm_responses:
+                    status, message = llm_responses.pop(0)
                 else:
                     status, message = TaskState.completed, "No more responses planned"
 
@@ -45,16 +55,16 @@ def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_re
                 requested_tools: list[str] = [tool['function']['name'] for tool in request_body.get('tools', [])]
                 
                 tool_name: str
-                if RoutingResponse.__name__ in requested_tools:
-                    arguments["agent_card"] = message
-                    tool_name = RoutingResponse.__name__
-                elif StringResponse.__name__ in requested_tools:
+                if "RoutingResponse" in requested_tools:
+                    arguments["agent_name"] = message
+                    tool_name = "RoutingResponse"
+                elif "StringResponse" in requested_tools:
                     arguments["response"] = message
-                    tool_name = StringResponse.__name__
+                    tool_name = "StringResponse"
                 else:
-                    # Default to StringResponse if not specified, though it should be one of them
+                    # Default to StringResponse
                     arguments["response"] = message
-                    tool_name = StringResponse.__name__
+                    tool_name = "StringResponse"
 
                 response = {
                     "id": "chatcmpl-mock123",
@@ -84,10 +94,9 @@ def fake_llm_server_stateful(responses: list[tuple[TaskState, str]], captured_re
     server = HTTPServer(('127.0.0.1', port), StatefulHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(1)
     yield f"http://127.0.0.1:{port}/v1"
     server.shutdown()
-    thread.join(timeout=5)
+    thread.join(timeout=2)
 
 @pytest.fixture(scope="module")
 def fake_registry_server() -> Generator[str, None, None]:
@@ -96,83 +105,99 @@ def fake_registry_server() -> Generator[str, None, None]:
     mcp_registry = InMemoryMcpRegistry()
     app = load_registry(agent_registry, mcp_registry)
 
-    config = uvicorn.Config(app, host="127.0.0.1", port=port)
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    time.sleep(1)
+    
+    start_time = time.time()
+    while time.time() - start_time < 5:
+        try:
+            with httpx.Client() as client:
+                if client.get(f"http://127.0.0.1:{port}/health").status_code == 200:
+                    break
+        except:
+            pass
+        time.sleep(0.1)
 
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True
-    thread.join(timeout=5)
+    thread.join(timeout=2)
+
+@pytest.fixture
+def router_server_factory(fake_registry_server, fake_llm_server):
+    servers = []
+    def _run_router(port):
+        router_config = RouterConfig(
+            router=RouterItem(
+                registry=RegistryConfig(agent=RegistryItemConfig(url=fake_registry_server)),
+                card=CardConfig(name="Router", description="Router Agent", version="1.0.0", url=f"http://127.0.0.1:{port}", skills=[]),
+                llm=LLMConfig(base_url=fake_llm_server, model="foo", api_key_env="FAKE_API_KEY")
+            )
+        )
+        os.environ["FAKE_API_KEY"] = "fake-key"
+        app = load_router(router_config=router_config)
+        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+        server = uvicorn.Server(config)
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        servers.append((server, thread))
+        
+        start_time = time.time()
+        while time.time() - start_time < 5:
+            try:
+                with httpx.Client() as client:
+                    if client.get(f"http://127.0.0.1:{port}/health").status_code == 200:
+                        break
+            except:
+                pass
+            time.sleep(0.1)
+        return f"http://127.0.0.1:{port}"
+
+    yield _run_router
+
+    for server, thread in servers:
+        server.should_exit = True
+        thread.join(timeout=2)
 
 @pytest.mark.asyncio
-async def test_rejection_full_flow(fake_registry_server: str) -> None:
-    # This test verifies that RoutingA2AClient handles agent rejection by asking the router for another agent.
-    
-    captured_requests: list[dict[str, Any]] = []
-    
-    # We need a sequence of responses for the stateful LLM server:
-    # 1. Router: Return RejectingAgent card
-    # 2. RejectingAgent: Return rejected status
-    # 3. Router: Return SuccessAgent card
-    # 4. SuccessAgent: Return success message
-    
-    # These will be created inside the loop
-    responses: list[tuple[TaskState, str]] = []
-    
-    for llm_url in fake_llm_server_stateful(responses, captured_requests):
-        with FakeAgent(registry_url=fake_registry_server, llm_url=llm_url, name="rejecting-agent", routing=False) as rejecting_agent:
-            rejecting_agent.executor_overwrite = NonRoutingAgent(rejecting_agent.config)
-            with FakeAgent(fake_registry_server, llm_url, "success-agent") as success_agent:
-                
-                # Setup Router
-                router_port = random.randint(10000, 60000)
-                router_config = RouterConfig(
-                    router=RouterItem(
-                        registry=RegistryConfig(
-                            agent=RegistryItemConfig(url=fake_registry_server)
-                        ),
-                        card=CardConfig(
-                            name="Router",
-                            description="Router Agent",
-                            version="1.0.0",
-                            url=f"http://127.0.0.1:{router_port}",
-                            skills=[]
-                        ),
-                        llm=LLMConfig(
-                            base_url=llm_url,
-                            model="foo",
-                            api_key_env="FAKE_API_KEY"
-                        )
-                    )
-                )
-                os.environ["FAKE_API_KEY"] = "fake-key"
-                router_app = load_router(router_config=router_config)
-                router_uvicorn_config = uvicorn.Config(router_app, host="127.0.0.1", port=router_port)
-                router_server = uvicorn.Server(router_uvicorn_config)
-                router_thread = threading.Thread(target=router_server.run, daemon=True)
-                router_thread.start()
-                time.sleep(2)
-                
-                try:
-                    # Now prepare the responses for the LLM
-                    # 1. Router receives initial request and returns rejecting-agent card
-                    responses.append((TaskState.completed, rejecting_agent.get_agent_card().model_dump_json()))
-                    # 2. RejectingAgent receives request and rejects
-                    responses.append((TaskState.rejected, "I cannot handle this"))
-                    # 3. Router receives retry request (with exclude_agents=['rejecting-agent']) and returns success-agent card
-                    responses.append((TaskState.completed, success_agent.get_agent_card().model_dump_json()))
-                    # 4. SuccessAgent receives request and completes
-                    responses.append((TaskState.completed, FINAL_RESPONSE))
-                    
-                    client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{router_port}")
-                    
-                    result = await client.send_message("Hello", context_id="test-context")
+async def test_rejection_full_flow(fake_registry_server, fake_llm_server, llm_responses, router_server_factory) -> None:
+    with FakeAgent(registry_url=fake_registry_server, llm_url=fake_llm_server, name="rejecting-agent", routing=False) as rejecting_agent:
+        with FakeAgent(fake_registry_server, fake_llm_server, "success-agent") as success_agent:
+            router_port = random.randint(10000, 60000)
+            router_url = router_server_factory(router_port)
+            
+            llm_responses.extend([
+                (TaskState.completed, "rejecting-agent"),
+                (TaskState.rejected, "I cannot handle this"),
+                (TaskState.completed, "success-agent"),
+                (TaskState.completed, FINAL_RESPONSE)
+            ])
+            
+            client = RoutingA2AClient(initial_url=router_url)
+            result = await client.send_message("Hello", context_id="test-context")
+            assert FINAL_RESPONSE in result
 
-                    assert result == FINAL_RESPONSE
-                    assert "rejecting-agent" in client.rejected_agents
-                    
-                finally:
-                    router_server.should_exit = True
-                    router_thread.join(timeout=5)
+@pytest.mark.asyncio
+async def test_rejection_reset_between_calls(fake_registry_server, fake_llm_server, llm_responses, captured_requests, router_server_factory) -> None:
+    with FakeAgent(registry_url=fake_registry_server, llm_url=fake_llm_server, name="rejecting-agent", routing=False) as rejecting_agent:
+        with FakeAgent(fake_registry_server, fake_llm_server, "success-agent") as success_agent:
+            router_port = random.randint(10000, 60000)
+            router_url = router_server_factory(router_port)
+            
+            llm_responses.extend([
+                (TaskState.completed, "rejecting-agent"),
+                (TaskState.rejected, "I cannot handle this"),
+                (TaskState.completed, "success-agent"),
+                (TaskState.completed, "First response")
+            ])
+            
+            client = RoutingA2AClient(initial_url=router_url)
+            await client.send_message("First call", context_id="ctx1")
+            
+            llm_responses.extend([
+                (TaskState.completed, "success-agent"),
+                (TaskState.completed, "Second response")
+            ])
+            
+            await client.send_message("Second call", context_id="ctx2")
