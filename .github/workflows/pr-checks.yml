@@ -93,7 +93,7 @@ jobs:
         uses: thollander/actions-comment-pull-request@v2
         with:
           message: |
-            New version: ${{ steps.bump.outputs.version }} 🚀
+            RC version: `${{ steps.bump.outputs.version }}` 🚀
           comment_tag: new-version
           pr_number: ${{ steps.pr.outputs.number }}
 
