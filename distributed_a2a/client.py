@@ -72,12 +72,12 @@ class RemoteAgentConnection:
             else:
                 raise Exception("Timeout waiting for agent to respond")
 
-        if task_state == TaskState.failed:
-            raise Exception("A2ATaskFailed")
         elif task_state == TaskState.auth_required:
             raise Exception("A2ATaskAuthRequired")
 
         match response.artifacts:
+            case [Artifact(name=TaskState.failed, parts=[Part(root=TextPart(text=result))])]:
+                return result
             case [Artifact(name='target_agent', parts=[Part(root=TextPart(text=agent_card))])]:
                 return AgentCard(**json.loads(agent_card))
             case [Artifact(name='current_result', parts=[Part(root=TextPart(text=result))])]:
