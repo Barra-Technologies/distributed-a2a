@@ -75,9 +75,10 @@ class RemoteAgentConnection:
         elif task_state == TaskState.auth_required:
             raise Exception("A2ATaskAuthRequired")
 
+        logging.info(f"Task {response.id} finished with status {task_state}")
         match response.artifacts:
-            case [Artifact(name=TaskState.failed, parts=[Part(root=TextPart(text=result))])]:
-                return result
+            case [Artifact(name='failed', parts=[Part(root=TextPart(text=message))])]:
+                return message
             case [Artifact(name='target_agent', parts=[Part(root=TextPart(text=agent_card))])]:
                 return AgentCard(**json.loads(agent_card))
             case [Artifact(name='current_result', parts=[Part(root=TextPart(text=result))])]:
