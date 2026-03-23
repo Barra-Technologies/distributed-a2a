@@ -40,12 +40,11 @@ class RemoteAgentConnection:
                 responses.append(response)
 
         task_response: Task | None = None
-        match responses:
-            case [(task, _)]:
-                task_response = task
-            case _:
-                raise Exception("Wrong response format")
-        return task_response
+        for response in responses:
+            if isinstance(response, tuple):
+                task, event = response
+                return task
+        raise Exception("Wrong response format")
 
     async def _get_task(self, task_id: str) -> Task:
         query_params: TaskQueryParams = TaskQueryParams(id=task_id)
@@ -75,16 +74,22 @@ class RemoteAgentConnection:
         elif task_state == TaskState.auth_required:
             raise Exception("A2ATaskAuthRequired")
 
-        logging.info(f"Task {response.id} finished with status {task_state}")
-        match response.artifacts:
-            case [Artifact(name='failed', parts=[Part(root=TextPart(text=message))])]:
-                return message
-            case [Artifact(name='target_agent', parts=[Part(root=TextPart(text=agent_card))])]:
-                return AgentCard(**json.loads(agent_card))
-            case [Artifact(name='current_result', parts=[Part(root=TextPart(text=result))])]:
-                return result
-            case _:
-                raise Exception("Wrong response format")
+
+        for artifact in response.artifacts or []:
+            if artifact.name == 'routing_error':
+                match artifact.parts:
+                    case [Part(root=TextPart(text=error_msg))]:
+                        return error_msg
+            elif artifact.name == 'target_agent':
+                match artifact.parts:
+                    case [Part(root=TextPart(text=agent_card_str))]:
+                        return AgentCard(**json.loads(agent_card_str))
+            elif artifact.name == 'current_result':
+                match artifact.parts:
+                    case [Part(root=TextPart(text=result))]:
+                        return result
+
+        raise Exception("Wrong response format")
 
 
 MAX_RECURSION_DEPTH = 10

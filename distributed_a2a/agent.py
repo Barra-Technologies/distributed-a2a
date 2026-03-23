@@ -24,6 +24,7 @@ class AgentResponse(BaseModel):
 
 class RoutingResponse(AgentResponse):
     agent_name: Optional[str] = Field(default=None, description="The agent_name of the agent to be routed to")
+    message: Optional[str] = Field(default=None, description="The answer, answered by the routing agent")
 
 
 class StringResponse(AgentResponse):
