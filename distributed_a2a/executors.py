@@ -18,6 +18,13 @@ from .registry import McpRegistryLookup, AgentRegistryLookupClient
 
 logger: Logger = logging.getLogger(__name__)
 
+
+class RoutingFailed(Exception):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 ROUTING_SYSTEM_PROMPT = """
 # Role: Multi-agent Router
 You are a helpful routing assistant which routes user requests to specialized remote agents in  a multi-agent setup.
@@ -26,13 +33,12 @@ You are a helpful routing assistant which routes user requests to specialized re
 Your main task is to:
 1. look up available agents via the provided registry tool
 2. select the best matching agent for the user query.
-3. return the agent_name for the selected agent.
+3. return the agent_name for the selected agent or the answer if no matching agent is found.
 
 ## Rules
 - Return only the agent_name as a string.
 - If the user query is relevant to multiple agents, return the agent_name of the agent with the highest match.
-- If the user query is not relevant to any agent, return the agent_name of the generic agent.
-- If no generic agent is available, return an error message.
+- If the user query is not relevant to any agent, try to answer it yourself starting with a disclaimer that states "DISCLAIMER: I am not a specialized agent and will answer to the best of my knowledge" plus a short description of which skills the specialized remote agents have
 """
 
 
@@ -119,6 +125,20 @@ class RoutingAgentExecutor(AgentExecutor):
                 final=True,
                 context_id=context.context_id,
                 task_id=context.task_id))
+        except RoutingFailed as e:
+            logger.error(f"Routing failed for context {context.context_id}: {e.message}")
+            artifact = new_text_artifact(name='routing_error', description='Error message for routing failure.',
+                                         text=e.message)
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
+                                                                    context_id=context.context_id,
+                                                                    task_id=context.task_id,
+                                                                    last_chunk=True,
+                                                                    artifact=artifact))
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
+                state=TaskState.failed),
+                final=True,
+                context_id=context.context_id,
+                task_id=context.task_id))
         except Exception as e:
             logger.error(f"Error executing agent task for context {context.context_id}: {e}", )
             await event_queue.enqueue_event(TaskStatusUpdateEvent(
@@ -193,6 +213,21 @@ class RoutingExecutor(AgentExecutor):
                 final=True,
                 context_id=context.context_id,
                 task_id=context.task_id))
+        except RoutingFailed as e:
+            logger.error(f"Routing failed for context {context.context_id}: {e.message}")
+            artifact = new_text_artifact(name='routing_error', description='Error message for routing failure.',
+                                         text=e.message)
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
+                                                                    context_id=context.context_id,
+                                                                    task_id=context.task_id,
+                                                                    last_chunk=True,
+                                                                    artifact=artifact))
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
+                state=TaskState.failed),
+                final=True,
+                context_id=context.context_id,
+                task_id=context.task_id))
+
         except Exception as e:
             logger.error(f"Error executing agent task for context {context.context_id}: {e}")
             await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
@@ -207,13 +242,14 @@ async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingRes
                                            context: RequestContext) -> Artifact:
     routing_agent_response: RoutingResponse = await routing_agent(message=context.get_user_input(),
                                                                   context_id=context.context_id)
-    agent_name: str = routing_agent_response.agent_name
+    agent_name: str | None = routing_agent_response.agent_name
+    logger.info(f"routing response received: {routing_agent_response}")
     if agent_name is None:
-        raise ValueError("LLM returned a None agent")
+        raise RoutingFailed(message=routing_agent_response.message if routing_agent_response.message else str(routing_agent_response))
     logger.info(f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.")
     agent_card: dict[str, Any] | None = agent_registry.get_agent_card(agent_name)
     if agent_card is None:
-        raise ValueError(f"agent not found for name: {agent_name}")
+        raise RoutingFailed(message=routing_agent_response.message if routing_agent_response.message else str(routing_agent_response))
     logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
     artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
                                  text=json.dumps(agent_card))
