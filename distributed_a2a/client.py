@@ -40,11 +40,12 @@ class RemoteAgentConnection:
                 responses.append(response)
 
         task_response: Task | None = None
-        for response in responses:
-            if isinstance(response, tuple):
-                task, event = response
-                return task
-        raise Exception("Wrong response format")
+        match responses:
+            case [(task, _)]:
+                task_response = task
+            case _:
+                raise Exception("Wrong response format")
+        return task_response
 
     async def _get_task(self, task_id: str) -> Task:
         query_params: TaskQueryParams = TaskQueryParams(id=task_id)
@@ -76,18 +77,13 @@ class RemoteAgentConnection:
 
 
         for artifact in response.artifacts or []:
-            if artifact.name == 'routing_error':
-                match artifact.parts:
-                    case [Part(root=TextPart(text=error_msg))]:
-                        return error_msg
-            elif artifact.name == 'target_agent':
-                match artifact.parts:
-                    case [Part(root=TextPart(text=agent_card_str))]:
-                        return AgentCard(**json.loads(agent_card_str))
-            elif artifact.name == 'current_result':
-                match artifact.parts:
-                    case [Part(root=TextPart(text=result))]:
-                        return result
+            match artifact.name, artifact.parts:
+                case 'routing_error', [Part(root=TextPart(text=error_msg))]:
+                    return error_msg
+                case 'target_agent', [Part(root=TextPart(text=agent_card_str))]:
+                    return AgentCard(**json.loads(agent_card_str))
+                case 'current_result', [Part(root=TextPart(text=result))]:
+                    return result
 
         raise Exception("Wrong response format")
 
