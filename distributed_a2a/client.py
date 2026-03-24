@@ -72,18 +72,20 @@ class RemoteAgentConnection:
             else:
                 raise Exception("Timeout waiting for agent to respond")
 
-        if task_state == TaskState.failed:
-            raise Exception("A2ATaskFailed")
         elif task_state == TaskState.auth_required:
             raise Exception("A2ATaskAuthRequired")
 
-        match response.artifacts:
-            case [Artifact(name='target_agent', parts=[Part(root=TextPart(text=agent_card))])]:
-                return AgentCard(**json.loads(agent_card))
-            case [Artifact(name='current_result', parts=[Part(root=TextPart(text=result))])]:
-                return result
-            case _:
-                raise Exception("Wrong response format")
+
+        for artifact in response.artifacts or []:
+            match artifact.name, artifact.parts:
+                case 'routing_error', [Part(root=TextPart(text=error_msg))]:
+                    return error_msg
+                case 'target_agent', [Part(root=TextPart(text=agent_card_str))]:
+                    return AgentCard(**json.loads(agent_card_str))
+                case 'current_result', [Part(root=TextPart(text=result))]:
+                    return result
+
+        raise Exception("Wrong response format")
 
 
 MAX_RECURSION_DEPTH = 10
