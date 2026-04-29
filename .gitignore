@@ -2,6 +2,9 @@
 .idea
 distributed-a2a.iml
 
+# executions
+__pycache__
+.venv
 
 # pypi package
 distributed_a2a/build

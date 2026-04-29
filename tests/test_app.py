@@ -17,12 +17,12 @@ from tests.fake_llm import get_llm_handler
 FINAL_RESPONSE = "Hello! This is a mock response from the fake OpenAI server."
 
 @pytest.fixture(scope="module")
-def fake_completed_llm() -> Generator[str]:
+def fake_completed_llm() -> Generator[str, None, None]:
     for url in fake_llm_server(TaskState.completed, FINAL_RESPONSE):
         yield url
 
 
-def fake_llm_server(state: TaskState, response: str) -> Generator[str]:
+def fake_llm_server(state: TaskState, response: str) -> Generator[str, None, None]:
     port = random.randint(10000, 60000)
     # noinspection PyTypeChecker
     server = HTTPServer(('127.0.0.1', port), get_llm_handler(state, response))
@@ -35,7 +35,7 @@ def fake_llm_server(state: TaskState, response: str) -> Generator[str]:
 
 
 @pytest.fixture(scope="module")
-def fake_registry_server() -> Generator[str]:
+def fake_registry_server() -> Generator[str, None, None]:
     port = 8082
     agent_registry = InMemoryAgentRegistry()
     mcp_registry = InMemoryMcpRegistry()

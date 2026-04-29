@@ -46,7 +46,7 @@ class FakeAgent:
     def get_agent_card(self) -> AgentCard:
         return get_agent_card(self.config)
 
-    def __enter__(self) -> FakeAgent:
+    def __enter__(self) -> "FakeAgent":
         app = load_app(self.config)
 
         # Start the app server in a separate thread
