@@ -7,3 +7,5 @@ distributed-a2a.iml
 distributed_a2a/build
 distributed_a2a/distributed_a2a.egg-info
 distributed_a2a/dist
+distributed_a2a/__pycache__/*
+distributed_a2a/registry_server/__pycache__/*

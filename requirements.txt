@@ -1,6 +1,6 @@
 uvicorn==0.41.0
 a2a-sdk==0.3.24
-langchain==1.2.10
+langchain==1.2.15
 langchain_mcp_adapters==0.2.1
 langchain_openai==1.1.10
 langgraph_dynamodb_checkpoint==0.2.6.4
