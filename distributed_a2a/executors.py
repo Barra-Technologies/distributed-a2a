@@ -41,6 +41,14 @@ Your main task is to:
 - If the user query is not relevant to any agent, try to answer it yourself starting with a disclaimer that states "DISCLAIMER: I am not a specialized agent and will answer to the best of my knowledge" plus a short description of which skills the specialized remote agents have
 """
 
+GENERAL_SYSTEM_PROMPT = """
+You are an agent in a distributed multi-agent platform in which different specialized agents are deployed in order to answer different user queries.
+Therefore you should only reply to user queries pertaining to the scope explicitly mentioned in your role description below.
+Queries not pertaining to your main scope should be rejected such that another agent which is better suited can handle them.
+See below for your role and scope:
+
+"""
+
 
 class RoutingAgentExecutor(AgentExecutor):
 
@@ -70,7 +78,7 @@ class RoutingAgentExecutor(AgentExecutor):
         self.agent_registry = agent_registry
         self.agent = StatusAgent[StringResponse](
             llm_config=agent_config.agent.llm,
-            system_prompt=agent_config.agent.system_prompt,
+            system_prompt=GENERAL_SYSTEM_PROMPT + agent_config.agent.system_prompt,
             name=agent_config.agent.card.name,
             api_key=api_key,
             is_routing=False,
