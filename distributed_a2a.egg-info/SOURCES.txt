@@ -3,7 +3,6 @@ MANIFEST.in
 README.md
 pyproject.toml
 requirements.txt
-setup.py
 distributed_a2a/__init__.py
 distributed_a2a/agent.py
 distributed_a2a/client.py
