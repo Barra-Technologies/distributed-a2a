@@ -3,13 +3,10 @@ import json
 from uuid import uuid4
 
 import httpx
-from a2a.client import ClientConfig, ClientFactory, A2ACardResolver, ClientEvent
-from a2a.client import create_text_message_object
-from a2a.types import (
-    AgentCard,
-    Message, TaskQueryParams, Task, Artifact, Part, TextPart
-)
-from a2a.types import TaskState
+from a2a.client import (A2ACardResolver, ClientConfig, ClientEvent,
+                        ClientFactory, create_text_message_object)
+from a2a.types import (AgentCard, Message, Part, Task, TaskQueryParams,
+                       TaskState, TextPart)
 
 MAX_REQUESTS = 50
 
@@ -33,18 +30,14 @@ class RemoteAgentConnection:
         self.agent_client = client_factory.create(agent_card)
 
     async def _send_message_to_agent(self, message_request: Message) -> Task:
-
         responses: list[ClientEvent] = []
         async for response in self.agent_client.send_message(message_request):
             if isinstance(response, tuple):
                 responses.append(response)
 
-        task_response: Task | None = None
-        match responses:
-            case [(task, _)]:
-                task_response = task
-            case _:
-                raise Exception("Wrong response format")
+        if not responses:
+            raise Exception("Wrong response format: no task response received from agent")
+        task_response, _ = responses[-1]
         return task_response
 
     async def _get_task(self, task_id: str) -> Task:
@@ -75,17 +68,27 @@ class RemoteAgentConnection:
         elif task_state == TaskState.auth_required:
             raise Exception("A2ATaskAuthRequired")
 
+        elif task_state == TaskState.failed:
+            error_msg = "Agent task failed"
+            if response.status.message:
+                for part in response.status.message.parts or []:
+                    root = getattr(part, 'root', None)
+                    if root is not None and isinstance(root, TextPart):
+                        error_msg = root.text
+                        break
+            raise Exception(error_msg)
 
         for artifact in response.artifacts or []:
             match artifact.name, artifact.parts:
-                case 'routing_error', [Part(root=TextPart(text=error_msg))]:
+                case 'routing_error', [Part(root=TextPart(text=error_msg)), *_]:
                     return error_msg
-                case 'target_agent', [Part(root=TextPart(text=agent_card_str))]:
+                case 'target_agent', [Part(root=TextPart(text=agent_card_str)), *_]:
                     return AgentCard(**json.loads(agent_card_str))
-                case 'current_result', [Part(root=TextPart(text=result))]:
+                case 'current_result', [Part(root=TextPart(text=result)), *_]:
                     return result
 
-        raise Exception("Wrong response format")
+        artifact_names = [getattr(a, 'name', type(a).__name__) for a in (response.artifacts or [])]
+        raise Exception(f"Wrong response format: task state={task_state}, artifact_names={artifact_names}")
 
 
 MAX_RECURSION_DEPTH = 10
