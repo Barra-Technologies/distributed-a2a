@@ -1,20 +1,21 @@
 import json
 import logging
 from logging import Logger
-from typing import Optional, Any
+from typing import Any, Optional
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import TaskStatusUpdateEvent, TaskStatus, TaskState, TaskArtifactUpdateEvent, Artifact
+from a2a.types import (Artifact, TaskArtifactUpdateEvent, TaskState,
+                       TaskStatus, TaskStatusUpdateEvent)
 from a2a.utils import new_text_artifact
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from .agent import StatusAgent, RoutingResponse, StringResponse
+from .agent import RoutingResponse, StatusAgent, StringResponse
 from .config import settings
 from .model import AgentConfig, RouterConfig
-from .registry import McpRegistryLookup, AgentRegistryLookupClient
+from .registry import AgentRegistryLookupClient, McpRegistryLookup
 
 logger: Logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ Your main task is to:
 ## Rules
 - Return only the agent_name as a string.
 - If the user query is relevant to multiple agents, return the agent_name of the agent with the highest match.
+- If the user provides a list of rejected or excluded agents, do not route to any agent in that list. Use the `exclude_agents` parameter in the `agent_lookup` tool.
 - If the user query is not relevant to any agent, try to answer it yourself starting with a disclaimer that states "DISCLAIMER: I am not a specialized agent and will answer to the best of my knowledge" plus a short description of which skills the specialized remote agents have
 """
 
