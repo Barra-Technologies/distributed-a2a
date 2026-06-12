@@ -70,7 +70,7 @@ class RemoteAgentConnection:
 
         elif task_state == TaskState.failed:
             error_msg = "Agent task failed"
-            if response.status and response.status.message:
+            if response.status.message:
                 for part in response.status.message.parts or []:
                     root = getattr(part, 'root', None)
                     if root is not None and isinstance(root, TextPart):
@@ -87,9 +87,8 @@ class RemoteAgentConnection:
                 case 'current_result', [Part(root=TextPart(text=result)), *_]:
                     return result
 
-        raise Exception(
-            f"Wrong response format: task state={task_state}, artifacts={response.artifacts}"
-        )
+        artifact_names = [getattr(a, 'name', type(a).__name__) for a in (response.artifacts or [])]
+        raise Exception(f"Wrong response format: task state={task_state}, artifact_names={artifact_names}")
 
 
 MAX_RECURSION_DEPTH = 10
