@@ -30,7 +30,7 @@ bump-patch:
 
 upload:
 	python -m build
-	python3 -m twine upload dist/*
+	python3 -m twine upload --skip-existing dist/*
 
 mypy:
 	mypy .

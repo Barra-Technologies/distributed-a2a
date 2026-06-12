@@ -1,14 +1,15 @@
 Metadata-Version: 2.4
 Name: distributed_a2a
-Version: 0.1.21
+Version: 0.1.22
 Summary: A library for building A2A agents with routing capabilities
 Author-email: Fabian Bell <fabian.bell@barrabytes.com>, Simon Gyimah <simon.gyimah@barrabytes.com>
-License-Expression: MIT
+License: MIT
 Project-URL: Homepage, https://github.com/Barra-Technologies/distributed-a2a.git
 Project-URL: Repository, https://github.com/Barra-Technologies/distributed-a2a.git
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Developers
 Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: License :: OSI Approved :: MIT License
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.10
 Classifier: Programming Language :: Python :: 3.11
