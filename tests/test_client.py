@@ -1,5 +1,6 @@
 import httpx
 import pytest
+from collections.abc import AsyncGenerator
 from a2a.types import (AgentCapabilities, AgentCard, Message, Part, Role, Task,
                        TaskState, TaskStatus, TextPart)
 
@@ -10,7 +11,7 @@ class _StubAgentClient:
     def __init__(self, task: Task):
         self._task = task
 
-    async def send_message(self, _message: Message):
+    async def send_message(self, _message: Message) -> AsyncGenerator[tuple[Task, None], None]:
         yield self._task, None
 
 
