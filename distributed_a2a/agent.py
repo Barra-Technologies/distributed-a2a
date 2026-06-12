@@ -1,8 +1,9 @@
 import logging
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, cast
 
 from a2a.types import TaskState
 from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -63,13 +64,6 @@ class StatusAgent[ResponseT: AgentResponse]:
 
     async def __call__(self, message: str, context_id: Optional[str] = None) -> ResponseT:
         config: RunnableConfig = RunnableConfig(configurable={'thread_id': context_id})
-        response = await self.agent.ainvoke(LangGraphMessage(message), config) # type: ignore[arg-type]
+        response = await self.agent.ainvoke({"messages": [HumanMessage(content=message)]}, config)
         logging.info("agent response: %s", response)
-        return response['structured_response']  # type: ignore
-
-
-class LangGraphMessage(BaseModel):
-    messages: list[tuple[Literal['user'], str]]
-
-    def __init__(self, messages: str):
-        super().__init__(messages=[("user", messages)])
+        return cast(ResponseT, response['structured_response'])
