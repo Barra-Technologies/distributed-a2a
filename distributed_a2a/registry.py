@@ -1,7 +1,7 @@
 """Registry lookup for agents and MCP servers."""
 import asyncio
 import logging
-from typing import Callable, Any, cast
+from typing import Any, Callable, cast
 
 import httpx
 from a2a.types import AgentCard
@@ -61,13 +61,15 @@ class AgentRegistryLookupClient:
         response.raise_for_status()
         return cast(list[dict[str, Any]], response.json())
 
-    def get_agents(self) -> str:
+    def get_agents(self, exclude_agents: list[str] | None = None) -> str:
         """Retrieves all registered agents for the router.
 
         Returns:
             A list of agent details for the router.
         """
         agent_cards = self.get_agent_cards()
+        if exclude_agents is not None:
+            agent_cards = [card for card in agent_cards if card.get("name") not in exclude_agents]
         agent_cards_as_markdown = "\n\n\n".join(
             [self._extract_relevant_fields_for_router(card) for card in agent_cards])
         logger.info(f"Agent cards: {agent_cards_as_markdown}")
@@ -139,8 +141,11 @@ class AgentRegistryLookupClient:
         Returns:
             A StructuredTool for looking up agent cards.
         """
-        return StructuredTool.from_function(func=lambda: self.get_agents(), name="agent_lookup",
-                                            description="Gets all available agents in the registry")
+        return StructuredTool.from_function(
+            func=self.get_agents,
+            name="agent_lookup",
+            description="Gets all available agents in the registry. You can provide a list of agent names to exclude."
+        )
 
 
 class McpRegistryLookup:

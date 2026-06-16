@@ -10,7 +10,8 @@ from a2a.types import TaskState
 
 from distributed_a2a.client import RoutingA2AClient
 from distributed_a2a.registry_server.bootstrap import load_registry
-from distributed_a2a.registry_server.in_memory_registry_storage import InMemoryAgentRegistry, InMemoryMcpRegistry
+from distributed_a2a.registry_server.in_memory_registry_storage import (
+    InMemoryAgentRegistry, InMemoryMcpRegistry)
 from tests.fake_agent import FakeAgent
 from tests.fake_llm import get_llm_handler
 

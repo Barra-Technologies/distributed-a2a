@@ -1,6 +1,7 @@
+from collections.abc import AsyncGenerator
+
 import httpx
 import pytest
-from collections.abc import AsyncGenerator
 from a2a.types import (AgentCapabilities, AgentCard, Message, Part, Role, Task,
                        TaskState, TaskStatus, TextPart)
 
@@ -61,3 +62,39 @@ async def test_remote_agent_connection_raises_failed_task_message(monkeypatch: p
         # When/Then: the client surfaces the remote task failure message
         with pytest.raises(Exception, match="remote agent failed: tool timeout"):
             await connection.send_message("Hello", "context-1")
+
+
+@pytest.mark.asyncio
+async def test_remote_agent_connection_returns_rejected_task_state_without_artifact(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    rejected_task = Task(
+        id="task-2",
+        context_id="context-2",
+        status=TaskStatus(state=TaskState.rejected),
+    )
+
+    def _stub_client_factory_ctor(config: object) -> _StubClientFactory:
+        return _StubClientFactory(config, rejected_task)
+
+    monkeypatch.setattr("distributed_a2a.client.ClientFactory", _stub_client_factory_ctor)
+
+    agent_card = AgentCard(
+        name="stub-agent",
+        description="stub",
+        url="http://127.0.0.1:9999",
+        version="1.0.0",
+        default_input_modes=["text"],
+        default_output_modes=["text"],
+        capabilities=AgentCapabilities(streaming=False, push_notifications=False),
+        skills=[],
+        preferred_transport="JSONRPC",
+    )
+
+    async with httpx.AsyncClient() as http_client:
+        connection = RemoteAgentConnection(agent_card, http_client)
+
+        # When: the remote task is rejected without a dedicated artifact
+        result = await connection.send_message("Hello", "context-2")
+
+        # Then: the client should still surface the rejected state
+        assert result == TaskState.rejected

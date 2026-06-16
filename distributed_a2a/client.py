@@ -46,7 +46,7 @@ class RemoteAgentConnection:
         return response
 
     async def send_message(self, message_to_send: str, context_id: str, task_id: None | str = None,
-                           count: int = 0) -> str | AgentCard:
+                           count: int = 0) -> str | AgentCard | TaskState:
         message: Message = create_text_message_object(content=message_to_send)
         message.message_id = str(uuid4())
         message.context_id = context_id
@@ -82,10 +82,15 @@ class RemoteAgentConnection:
             match artifact.name, artifact.parts:
                 case 'routing_error', [Part(root=TextPart(text=error_msg)), *_]:
                     return error_msg
+                case 'rejected', [Part(root=TextPart()), *_]:
+                    return TaskState.rejected
                 case 'target_agent', [Part(root=TextPart(text=agent_card_str)), *_]:
                     return AgentCard(**json.loads(agent_card_str))
                 case 'current_result', [Part(root=TextPart(text=result)), *_]:
                     return result
+
+        if task_state == TaskState.rejected:
+            return TaskState.rejected
 
         artifact_names = [getattr(a, 'name', type(a).__name__) for a in (response.artifacts or [])]
         raise Exception(f"Wrong response format: task state={task_state}, artifact_names={artifact_names}")
@@ -108,9 +113,14 @@ class RoutingA2AClient:
             await card_resolver.get_agent_card()
         )
 
-    async def send_message(self, message: str, context_id: str, depth: int = 0) -> str:
+    async def send_message(self, message: str, context_id: str, depth: int = 0,
+                           rejected_agents: list[str] | None = None) -> str:
         if depth > MAX_RECURSION_DEPTH:
             raise Exception("Maximum recursion depth exceeded. This is likely due to an infinite loop in your agent.")
+
+        if rejected_agents is None:
+            rejected_agents = []
+
         if self.current_card is None:
             await self.fetch_initial_card()
 
@@ -118,10 +128,32 @@ class RoutingA2AClient:
             raise ValueError("Failed to fetch current agent card.")
 
         agent_connection = RemoteAgentConnection(self.current_card, self.client)
+        message_to_send = message
+        if rejected_agents:
+            excluded_names = ", ".join(sorted(set(rejected_agents)))
+            rejection_msg = f"Please exclude the following agents from routing: {excluded_names}"
+            if rejection_msg not in message:
+                message_to_send = f"{message}\n\n{rejection_msg}"
 
-        agent_response: str | AgentCard = await agent_connection.send_message(message, context_id)
+        agent_response: str | AgentCard | TaskState = await agent_connection.send_message(message_to_send, context_id)
         if isinstance(agent_response, AgentCard):
+            if agent_response.url == self.current_card.url:
+                raise Exception("Agent redirected to itself.")
+            if agent_response.name in rejected_agents:
+                raise Exception(f"Agent {agent_response.name} was already rejected but was redirected to again.")
             self.current_card = agent_response
-            return await self.send_message(message, context_id, depth + 1)
+            return await self.send_message(message, context_id, depth + 1, rejected_agents)
+
+        if isinstance(agent_response, TaskState):
+            if agent_response == TaskState.rejected:
+                if self.current_card.name in rejected_agents:
+                    raise Exception(
+                        f"Agent {self.current_card.name} rejected the request again after being already in the rejected list."
+                    )
+                rejected_agents.append(self.current_card.name)
+                await self.fetch_initial_card()
+                return await self.send_message(message, context_id, depth + 1, rejected_agents)
+            else:
+                raise Exception(f"Unexpected task state returned by agent: {agent_response}")
 
         return agent_response
