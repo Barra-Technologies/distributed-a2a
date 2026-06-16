@@ -30,9 +30,9 @@ bump-patch:
 
 upload:
 	rm -rf dist build *.egg-info
-	python -m build
-	python -m twine check dist/*
-	python -m twine upload --skip-existing dist/*
+	python3 -m build
+	python3 -m twine check dist/*
+	python3 -m twine upload --skip-existing dist/*
 
 mypy:
 	mypy .
