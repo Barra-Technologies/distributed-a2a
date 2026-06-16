@@ -10,3 +10,4 @@ __pycache__
 distributed_a2a/build
 distributed_a2a/distributed_a2a.egg-info
 distributed_a2a/dist
+distributed_a2a.egg-info
