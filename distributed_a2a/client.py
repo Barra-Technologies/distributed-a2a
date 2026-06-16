@@ -89,6 +89,9 @@ class RemoteAgentConnection:
                 case 'current_result', [Part(root=TextPart(text=result)), *_]:
                     return result
 
+        if task_state == TaskState.rejected:
+            return TaskState.rejected
+
         artifact_names = [getattr(a, 'name', type(a).__name__) for a in (response.artifacts or [])]
         raise Exception(f"Wrong response format: task state={task_state}, artifact_names={artifact_names}")
 
@@ -141,13 +144,16 @@ class RoutingA2AClient:
             self.current_card = agent_response
             return await self.send_message(message, context_id, depth + 1, rejected_agents)
 
-        if agent_response == TaskState.rejected:
-            if self.current_card.name in rejected_agents:
-                raise Exception(
-                    f"Agent {self.current_card.name} rejected the request again after being already in the rejected list."
-                )
-            rejected_agents.append(self.current_card.name)
-            await self.fetch_initial_card()
-            return await self.send_message(message, context_id, depth + 1, rejected_agents)
+        if isinstance(agent_response, TaskState):
+            if agent_response == TaskState.rejected:
+                if self.current_card.name in rejected_agents:
+                    raise Exception(
+                        f"Agent {self.current_card.name} rejected the request again after being already in the rejected list."
+                    )
+                rejected_agents.append(self.current_card.name)
+                await self.fetch_initial_card()
+                return await self.send_message(message, context_id, depth + 1, rejected_agents)
+            else:
+                raise Exception(f"Unexpected task state returned by agent: {agent_response}")
 
         return agent_response
