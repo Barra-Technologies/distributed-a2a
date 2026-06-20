@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from uuid import uuid4
 
 import httpx
@@ -8,17 +9,40 @@ from a2a.client import (A2ACardResolver, ClientConfig, ClientEvent,
 from a2a.types import (AgentCard, Message, Part, Task, TaskQueryParams,
                        TaskState, TextPart)
 
-MAX_REQUESTS = 50
+DEFAULT_MAX_POLLS = 50
+DEFAULT_POLL_INTERVAL = 1.0
+
+
+class A2ATimeoutError(Exception):
+    """Raised when polling a remote agent task exceeds max_polls."""
+
+    def __init__(self, target_url: str, attempts: int, elapsed_seconds: float,
+                 last_task_state: TaskState | None) -> None:
+        self.target_url = target_url
+        self.attempts = attempts
+        self.elapsed_seconds = elapsed_seconds
+        self.last_task_state = last_task_state
+        super().__init__(
+            f"Timed out waiting for agent at {target_url}: "
+            f"attempts={attempts}, elapsed_seconds={elapsed_seconds:.2f}, "
+            f"last_task_state={last_task_state}"
+        )
 
 
 class RemoteAgentConnection:
     """A class to hold the connections to the remote agents."""
 
-    def __init__(self, agent_card: AgentCard, client: httpx.AsyncClient):
+    def __init__(self, agent_card: AgentCard, client: httpx.AsyncClient,
+                 max_polls: int = DEFAULT_MAX_POLLS,
+                 poll_interval: float = DEFAULT_POLL_INTERVAL):
         if agent_card.preferred_transport is None:
             raise ValueError("Agent card preferred transport must be provided.")
         if agent_card.capabilities.streaming is None:
             raise ValueError("Agent card streaming capability must be provided.")
+
+        self.agent_card = agent_card
+        self.max_polls = max_polls
+        self.poll_interval = poll_interval
 
         client_config = ClientConfig(
             httpx_client=client,
@@ -45,30 +69,37 @@ class RemoteAgentConnection:
         response: Task = await self.agent_client.get_task(query_params)
         return response
 
-    async def send_message(self, message_to_send: str, context_id: str, task_id: None | str = None,
-                           count: int = 0) -> str | AgentCard | TaskState:
+    async def send_message(self, message_to_send: str, context_id: str,
+                           task_id: None | str = None) -> str | AgentCard | TaskState:
         message: Message = create_text_message_object(content=message_to_send)
         message.message_id = str(uuid4())
         message.context_id = context_id
 
+        started_at = time.monotonic()
         response: Task
         if task_id is None:
             response = await self._send_message_to_agent(message)
         else:
             response = await self._get_task(task_id)
 
-        task_state = response.status.state
-        if task_state == TaskState.working or task_state == TaskState.submitted:
-            if count < MAX_REQUESTS:
-                await asyncio.sleep(round(pow(1.05, count)))
-                return await self.send_message(message_to_send, context_id, response.id, count + 1)
-            else:
-                raise Exception("Timeout waiting for agent to respond")
+        attempts = 1
+        while response.status.state in (TaskState.working, TaskState.submitted):
+            if attempts > self.max_polls:
+                raise A2ATimeoutError(
+                    target_url=self.agent_card.url,
+                    attempts=attempts - 1,
+                    elapsed_seconds=time.monotonic() - started_at,
+                    last_task_state=response.status.state,
+                )
+            await asyncio.sleep(self.poll_interval * pow(1.05, attempts))
+            response = await self._get_task(response.id)
+            attempts += 1
 
-        elif task_state == TaskState.auth_required:
+        task_state = response.status.state
+        if task_state == TaskState.auth_required:
             raise Exception("A2ATaskAuthRequired")
 
-        elif task_state == TaskState.failed:
+        if task_state == TaskState.failed:
             error_msg = "Agent task failed"
             if response.status.message:
                 for part in response.status.message.parts or []:
@@ -100,10 +131,14 @@ MAX_RECURSION_DEPTH = 10
 
 
 class RoutingA2AClient:
-    def __init__(self, initial_url: str, opts: dict[str, str] | None = None):
+    def __init__(self, initial_url: str, opts: dict[str, str] | None = None,
+                 max_polls: int = DEFAULT_MAX_POLLS,
+                 poll_interval: float = DEFAULT_POLL_INTERVAL):
         self.initial_url = initial_url
         self.client = httpx.AsyncClient(headers=opts)
         self.current_card: AgentCard | None = None
+        self.max_polls = max_polls
+        self.poll_interval = poll_interval
 
     async def fetch_initial_card(self) -> None:
         card_resolver = A2ACardResolver(
@@ -127,7 +162,10 @@ class RoutingA2AClient:
         if self.current_card is None:
             raise ValueError("Failed to fetch current agent card.")
 
-        agent_connection = RemoteAgentConnection(self.current_card, self.client)
+        agent_connection = RemoteAgentConnection(
+            self.current_card, self.client,
+            max_polls=self.max_polls, poll_interval=self.poll_interval,
+        )
         message_to_send = message
         if rejected_agents:
             excluded_names = ", ".join(sorted(set(rejected_agents)))

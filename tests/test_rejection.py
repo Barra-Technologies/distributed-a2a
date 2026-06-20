@@ -35,7 +35,7 @@ async def test_rejection_triggers_automated_rerouting(monkeypatch: pytest.Monkey
     router_messages: list[str] = []
 
     class FakeRemoteAgentConnection:
-        def __init__(self, agent_card: AgentCard, _client: object) -> None:
+        def __init__(self, agent_card: AgentCard, _client: object, **_kwargs: object) -> None:
             self.agent_card = agent_card
 
         async def send_message(self, message_to_send: str, _context_id: str) -> str | AgentCard | TaskState:
@@ -85,7 +85,7 @@ async def test_rejected_agents_reset_between_calls(monkeypatch: pytest.MonkeyPat
         return current
 
     class FakeRemoteAgentConnection:
-        def __init__(self, agent_card: AgentCard, _client: object) -> None:
+        def __init__(self, agent_card: AgentCard, _client: object, **_kwargs: object) -> None:
             self.agent_card = agent_card
 
         async def send_message(self, message_to_send: str, _context_id: str) -> str | AgentCard | TaskState:
@@ -144,7 +144,7 @@ async def test_fails_when_router_returns_already_rejected_agent(monkeypatch: pyt
     step = {"idx": 0}
 
     class FakeRemoteAgentConnection:
-        def __init__(self, agent_card: AgentCard, _client: object) -> None:
+        def __init__(self, agent_card: AgentCard, _client: object, **_kwargs: object) -> None:
             self.agent_card = agent_card
 
         async def send_message(self, message_to_send: str, _context_id: str) -> str | AgentCard | TaskState:
