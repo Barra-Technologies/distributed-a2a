@@ -3,7 +3,7 @@ from typing import Any, Literal, cast
 
 from a2a.types import TaskState
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -36,6 +36,21 @@ class RoutingResponse(AgentResponse):
 
 class StringResponse(AgentResponse):
     response: str = Field(description="The main response to be returned to the user")
+
+
+class AgentInvocation[ResponseT: AgentResponse](BaseModel):
+    """Result of invoking a :class:`StatusAgent`.
+
+    Exposes both the structured response (LLM-visible content the agent decided
+    to return) and the raw message list produced by the underlying LangGraph
+    agent, so callers can mine ``ToolMessage.artifact`` for out-of-band binary
+    payloads (e.g. files returned by MCP tools) without those bytes ever passing
+    through the LLM context.
+    """
+
+    structured: ResponseT
+    messages: list[BaseMessage]
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class StatusAgent[ResponseT: AgentResponse]:
@@ -77,7 +92,7 @@ class StatusAgent[ResponseT: AgentResponse]:
 
     async def __call__(self,
                        message: str,
-                       context_id: str | None = None) -> ResponseT:
+                       context_id: str | None = None) -> AgentInvocation[ResponseT]:
         config: RunnableConfig = RunnableConfig(
             configurable={'thread_id': context_id}
         )
@@ -86,4 +101,7 @@ class StatusAgent[ResponseT: AgentResponse]:
             config
         )
         logging.info("agent response: %s", response)
-        return cast(ResponseT, response['structured_response'])
+        return AgentInvocation[ResponseT](
+            structured=cast(ResponseT, response['structured_response']),
+            messages=list(response.get('messages', [])),
+        )

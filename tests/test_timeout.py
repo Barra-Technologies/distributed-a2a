@@ -8,8 +8,8 @@ import pytest
 from a2a.types import (AgentCapabilities, AgentCard, Artifact, Message, Part,
                        Role, Task, TaskState, TaskStatus, TextPart)
 
-from distributed_a2a.client import (A2ATimeoutError, RemoteAgentConnection,
-                                    RoutingA2AClient)
+from distributed_a2a.client import (A2ATimeoutError, AgentReply,
+                                    RemoteAgentConnection, RoutingA2AClient)
 
 
 def _agent_card() -> AgentCard:
@@ -124,7 +124,9 @@ async def test_send_message_honors_completion_on_final_allowed_poll(
         )
         result = await connection.send_message("hi", "ctx-x")
 
-    assert result == "all done"
+    assert isinstance(result, AgentReply)
+    assert result.text == "all done"
+    assert result.files == []
     assert scripted.get_task_calls == 3
     assert scripted._get_states == []
 
@@ -156,7 +158,9 @@ async def test_send_message_returns_immediately_if_already_completed(
         )
         result = await connection.send_message("hi", "ctx-x")
 
-    assert result == "all done"
+    assert isinstance(result, AgentReply)
+    assert result.text == "all done"
+    assert result.files == []
 
 
 def test_a2a_timeout_error_message_includes_diagnostics() -> None:
@@ -182,8 +186,8 @@ async def test_routing_a2a_client_propagates_poll_kwargs(
             captured["poll_interval"] = poll_interval
             self.agent_card = agent_card
 
-        async def send_message(self, _message: str, _context_id: str) -> str:
-            return "done"
+        async def send_message(self, _message: str, _context_id: str) -> AgentReply:
+            return AgentReply(text="done")
 
     monkeypatch.setattr("distributed_a2a.client.RemoteAgentConnection", _Capturing)
 
@@ -197,5 +201,7 @@ async def test_routing_a2a_client_propagates_poll_kwargs(
     monkeypatch.setattr(client, "fetch_initial_card", _fetch)
 
     result = await client.send_message("hi", context_id="ctx-1")
-    assert result == "done"
+    assert isinstance(result, AgentReply)
+    assert result.text == "done"
+    assert result.files == []
     assert captured == {"max_polls": 7, "poll_interval": 0.25}

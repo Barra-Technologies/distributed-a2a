@@ -1,7 +1,7 @@
 import pytest
 from a2a.types import AgentCapabilities, AgentCard, TaskState
 
-from distributed_a2a.client import RoutingA2AClient
+from distributed_a2a.client import AgentReply, RoutingA2AClient
 
 
 def build_card(name: str, url: str) -> AgentCard:
@@ -38,7 +38,7 @@ async def test_rejection_triggers_automated_rerouting(monkeypatch: pytest.Monkey
         def __init__(self, agent_card: AgentCard, _client: object, **_kwargs: object) -> None:
             self.agent_card = agent_card
 
-        async def send_message(self, message_to_send: str, _context_id: str) -> str | AgentCard | TaskState:
+        async def send_message(self, message_to_send: str, _context_id: str) -> AgentReply | AgentCard | TaskState:
             if self.agent_card.name == "Router":
                 router_messages.append(message_to_send)
                 if "Please exclude the following agents from routing: rejecting-agent" in message_to_send:
@@ -49,7 +49,7 @@ async def test_rejection_triggers_automated_rerouting(monkeypatch: pytest.Monkey
                 return TaskState.rejected
 
             if self.agent_card.name == "success-agent":
-                return "final answer"
+                return AgentReply(text="final answer")
 
             raise AssertionError(f"Unexpected agent {self.agent_card.name}")
 
@@ -57,7 +57,8 @@ async def test_rejection_triggers_automated_rerouting(monkeypatch: pytest.Monkey
 
     result = await client.send_message("Hello", context_id="ctx-1")
 
-    assert result == "final answer"
+    assert isinstance(result, AgentReply)
+    assert result.text == "final answer"
     assert len(router_messages) == 2
     assert "Please exclude the following agents from routing" not in router_messages[0]
     assert "Please exclude the following agents from routing: rejecting-agent" in router_messages[1]
@@ -88,7 +89,7 @@ async def test_rejected_agents_reset_between_calls(monkeypatch: pytest.MonkeyPat
         def __init__(self, agent_card: AgentCard, _client: object, **_kwargs: object) -> None:
             self.agent_card = agent_card
 
-        async def send_message(self, message_to_send: str, _context_id: str) -> str | AgentCard | TaskState:
+        async def send_message(self, message_to_send: str, _context_id: str) -> AgentReply | AgentCard | TaskState:
             idx = next_step()
             match idx:
                 case 0:
@@ -104,7 +105,7 @@ async def test_rejected_agents_reset_between_calls(monkeypatch: pytest.MonkeyPat
                     return success_card
                 case 3:
                     assert self.agent_card.name == "success-agent"
-                    return "first response"
+                    return AgentReply(text="first response")
                 case 4:
                     assert self.agent_card.name == "success-agent"
                     return TaskState.rejected
@@ -115,7 +116,7 @@ async def test_rejected_agents_reset_between_calls(monkeypatch: pytest.MonkeyPat
                     return rejecting_card
                 case 6:
                     assert self.agent_card.name == "rejecting-agent"
-                    return "second response"
+                    return AgentReply(text="second response")
                 case _:
                     raise AssertionError(f"Unexpected step {idx}")
 
@@ -124,8 +125,8 @@ async def test_rejected_agents_reset_between_calls(monkeypatch: pytest.MonkeyPat
     first = await client.send_message("First", context_id="ctx-1")
     second = await client.send_message("Second", context_id="ctx-2")
 
-    assert first == "first response"
-    assert second == "second response"
+    assert isinstance(first, AgentReply) and first.text == "first response"
+    assert isinstance(second, AgentReply) and second.text == "second response"
 
 
 @pytest.mark.asyncio
@@ -147,7 +148,7 @@ async def test_fails_when_router_returns_already_rejected_agent(monkeypatch: pyt
         def __init__(self, agent_card: AgentCard, _client: object, **_kwargs: object) -> None:
             self.agent_card = agent_card
 
-        async def send_message(self, message_to_send: str, _context_id: str) -> str | AgentCard | TaskState:
+        async def send_message(self, message_to_send: str, _context_id: str) -> AgentReply | AgentCard | TaskState:
             idx = step["idx"]
             step["idx"] += 1
             if idx == 0:

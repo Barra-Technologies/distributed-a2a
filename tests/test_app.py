@@ -59,10 +59,12 @@ async def test_app_completed_path(fake_registry_server: str, fake_completed_llm:
     with FakeAgent(fake_registry_server, fake_completed_llm, "test-agent") as agent:
         # When
         client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{agent.app_port}/{agent.name}")
-        response = await client.send_message(message="Hello", context_id="test-context")
+        reply = await client.send_message(message="Hello", context_id="test-context")
 
         # Then: Check the response
-        assert "This is a mock response from the fake OpenAI server." in response
+        assert reply.text is not None
+        assert "This is a mock response from the fake OpenAI server." in reply.text
+        assert reply.files == []
 
 
 @pytest.mark.asyncio
@@ -75,7 +77,8 @@ async def test_app_redirect_path(fake_registry_server: str, fake_completed_llm: 
                 client = RoutingA2AClient(initial_url=f"http://127.0.0.1:{first_agent.app_port}")
 
                 # When
-                response = await client.send_message(message="Hello", context_id="test-context")
+                reply = await client.send_message(message="Hello", context_id="test-context")
 
                 # Then
-                assert FINAL_RESPONSE in response
+                assert reply.text is not None
+                assert FINAL_RESPONSE in reply.text

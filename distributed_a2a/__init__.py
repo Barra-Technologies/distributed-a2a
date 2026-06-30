@@ -1,4 +1,4 @@
-from .client import A2ATimeoutError, RoutingA2AClient
+from .client import A2ATimeoutError, AgentReply, FileRef, RoutingA2AClient
 from .model import (AgentConfig, AgentItem, CardConfig, LLMConfig,
                     RegistryConfig, RegistryItemConfig, RouterConfig,
                     RouterItem, SkillConfig)
@@ -15,6 +15,8 @@ __all__ = [
     "load_router",
     "RoutingA2AClient",
     "A2ATimeoutError",
+    "AgentReply",
+    "FileRef",
     "load_registry",
     "AgentConfig",
     "SkillConfig",

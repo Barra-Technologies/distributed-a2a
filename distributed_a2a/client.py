@@ -1,16 +1,46 @@
 import asyncio
 import json
 import time
+from dataclasses import dataclass, field
 from uuid import uuid4
 
 import httpx
 from a2a.client import (A2ACardResolver, ClientConfig, ClientEvent,
                         ClientFactory, create_text_message_object)
-from a2a.types import (AgentCard, Message, Part, Task, TaskQueryParams,
-                       TaskState, TextPart)
+from a2a.types import (AgentCard, FilePart, FileWithBytes, FileWithUri,
+                       Message, Part, Task, TaskQueryParams, TaskState,
+                       TextPart)
 
 DEFAULT_MAX_POLLS = 50
 DEFAULT_POLL_INTERVAL = 1.0
+
+
+@dataclass
+class FileRef:
+    """A file payload received as part of an A2A agent reply.
+
+    Exactly one of ``bytes_b64`` (for ``FileWithBytes``) or ``uri`` (for
+    ``FileWithUri``) is populated. ``bytes_b64`` is the raw base64 string
+    delivered over the wire by the A2A SDK — the caller is responsible for
+    decoding before forwarding the bytes.
+    """
+
+    name: str
+    mime_type: str
+    bytes_b64: str = ""
+    uri: str | None = None
+
+
+@dataclass
+class AgentReply:
+    """Structured reply from a routing-aware agent.
+
+    Carries the user-visible text (if any) plus zero-or-more files that the
+    agent emitted out-of-band as ``FilePart`` artifacts.
+    """
+
+    text: str | None = None
+    files: list[FileRef] = field(default_factory=list)
 
 
 class A2ATimeoutError(Exception):
@@ -69,8 +99,10 @@ class RemoteAgentConnection:
         response: Task = await self.agent_client.get_task(query_params)
         return response
 
-    async def send_message(self, message_to_send: str, context_id: str,
-                           task_id: None | str = None) -> str | AgentCard | TaskState:
+    async def send_message(self,
+                           message_to_send: str,
+                           context_id: str,
+                           task_id: None | str = None) -> AgentReply | AgentCard | TaskState:
         message: Message = create_text_message_object(content=message_to_send)
         message.message_id = str(uuid4())
         message.context_id = context_id
@@ -112,13 +144,36 @@ class RemoteAgentConnection:
         for artifact in response.artifacts or []:
             match artifact.name, artifact.parts:
                 case 'routing_error', [Part(root=TextPart(text=error_msg)), *_]:
-                    return error_msg
+                    return AgentReply(text=error_msg)
                 case 'rejected', [Part(root=TextPart()), *_]:
                     return TaskState.rejected
                 case 'target_agent', [Part(root=TextPart(text=agent_card_str)), *_]:
                     return AgentCard(**json.loads(agent_card_str))
-                case 'current_result', [Part(root=TextPart(text=result)), *_]:
-                    return result
+
+        text_out: str | None = None
+        files_out: list[FileRef] = []
+        for artifact in response.artifacts or []:
+            for part in artifact.parts or []:
+                root = getattr(part, "root", None)
+                if isinstance(root, TextPart) and artifact.name == "current_result":
+                    text_out = root.text
+                elif isinstance(root, FilePart):
+                    root_file = root.file
+                    if isinstance(root_file, FileWithBytes):
+                        files_out.append(FileRef(
+                            name=root_file.name or artifact.name or "file.bin",
+                            mime_type=root_file.mime_type or "application/octet-stream",
+                            bytes_b64=root_file.bytes,
+                        ))
+                    elif isinstance(root_file, FileWithUri):
+                        files_out.append(FileRef(
+                            name=root_file.name or artifact.name or "file.bin",
+                            mime_type=root_file.mime_type or "application/octet-stream",
+                            uri=root_file.uri,
+                        ))
+
+        if text_out is not None or files_out:
+            return AgentReply(text=text_out, files=files_out)
 
         if task_state == TaskState.rejected:
             return TaskState.rejected
@@ -157,8 +212,10 @@ class RoutingA2AClient:
             await card_resolver.get_agent_card()
         )
 
-    async def send_message(self, message: str, context_id: str, depth: int = 0,
-                           rejected_agents: list[str] | None = None) -> str:
+    async def send_message(self, message: str,
+                           context_id: str,
+                           depth: int = 0,
+                           rejected_agents: list[str] | None = None) -> AgentReply:
         if depth > MAX_RECURSION_DEPTH:
             raise Exception("Maximum recursion depth exceeded. This is likely due to an infinite loop in your agent.")
 
@@ -182,7 +239,7 @@ class RoutingA2AClient:
             if rejection_msg not in message:
                 message_to_send = f"{message}\n\n{rejection_msg}"
 
-        agent_response: str | AgentCard | TaskState = await agent_connection.send_message(message_to_send, context_id)
+        agent_response: AgentReply | AgentCard | TaskState = await agent_connection.send_message(message_to_send, context_id)
         if isinstance(agent_response, AgentCard):
             if agent_response.url == self.current_card.url:
                 raise Exception("Agent redirected to itself.")

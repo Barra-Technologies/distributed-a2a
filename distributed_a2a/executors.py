@@ -4,12 +4,15 @@ from typing import Any
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import (Artifact, TaskArtifactUpdateEvent, TaskState,
-                       TaskStatus, TaskStatusUpdateEvent)
+from a2a.types import (Artifact, FilePart, FileWithBytes, Part,
+                       TaskArtifactUpdateEvent, TaskState, TaskStatus,
+                       TaskStatusUpdateEvent)
 from a2a.utils import new_text_artifact
+from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from mcp.types import BlobResourceContents, EmbeddedResource, ImageContent
 
 from .agent import RoutingResponse, StatusAgent, StringResponse
 from .config import settings
@@ -17,6 +20,32 @@ from .model import AgentConfig, RouterConfig
 from .registry import AgentRegistryLookupClient, McpRegistryLookup
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_file_parts(messages: list[BaseMessage]) -> list[tuple[str, FilePart]]:
+    out: list[tuple[str, FilePart]] = []
+    for message in messages:
+        if not isinstance(message, ToolMessage):
+            continue
+        artifact = getattr(message, "artifact", None)
+        if not artifact:
+            continue
+        for block in artifact:
+            if isinstance(block, EmbeddedResource) and isinstance(block.resource, BlobResourceContents):
+                uri_str = str(block.resource.uri)
+                name = uri_str.rsplit("/", 1)[-1] or "file.bin"
+                out.append((name, FilePart(file=FileWithBytes(
+                    name=name,
+                    mime_type=block.resource.mimeType or "application/octet-stream",
+                    bytes=block.resource.blob,
+                ))))
+            elif isinstance(block, ImageContent):
+                out.append(("image", FilePart(file=FileWithBytes(
+                    name="image",
+                    mime_type=block.mimeType,
+                    bytes=block.data,
+                ))))
+    return out
 
 
 class RoutingFailed(Exception):
@@ -116,21 +145,36 @@ class RoutingAgentExecutor(AgentExecutor):
                 task_id=context.task_id
             ))
             await self.reinitialize_agent_with_tools()
-            agent_response: StringResponse = await self.agent(message=context.get_user_input(),
-                                                              context_id=context.context_id)
+            invocation = await self.agent(message=context.get_user_input(),
+                                          context_id=context.context_id)
+            agent_response: StringResponse = invocation.structured
 
             artifact: Artifact
+            file_parts: list[tuple[str, FilePart]] = []
             if agent_response.status == TaskState.rejected:
                 artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
             else:
                 logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
+                file_parts = _extract_file_parts(invocation.messages)
                 artifact = new_text_artifact(
                     name='current_result',
                     description='Result of request to agent.',
                     text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}"
                 )
 
-            # publish actual result
+            for name, file_part in file_parts:
+                await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+                    append=False,
+                    last_chunk=False,
+                    context_id=context.context_id,
+                    task_id=context.task_id,
+                    artifact=Artifact(
+                        artifact_id=name,
+                        name=name,
+                        parts=[Part(root=file_part)],
+                    ),
+                ))
+
             await event_queue.enqueue_event(TaskArtifactUpdateEvent(
                 append=False,
                 context_id=context.context_id,
@@ -297,8 +341,9 @@ class RoutingExecutor(AgentExecutor):
 async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingResponse],
                                            agent_registry: AgentRegistryLookupClient,
                                            context: RequestContext) -> Artifact:
-    routing_agent_response: RoutingResponse = await routing_agent(message=context.get_user_input(),
-                                                                  context_id=context.context_id)
+    invocation = await routing_agent(message=context.get_user_input(),
+                                     context_id=context.context_id)
+    routing_agent_response: RoutingResponse = invocation.structured
     agent_name: str | None = routing_agent_response.agent_name
     logger.info(f"routing response received: {routing_agent_response}")
     if agent_name is None:
