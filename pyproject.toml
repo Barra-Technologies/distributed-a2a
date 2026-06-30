@@ -37,6 +37,9 @@ ci = [
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 
+[tool.setuptools.package-data]
+distributed_a2a = ["py.typed", "schemas/*.json"]
+
 [project.urls]
 Homepage = "https://github.com/Barra-Technologies/distributed-a2a.git"
 Repository = "https://github.com/Barra-Technologies/distributed-a2a.git"

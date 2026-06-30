@@ -1,10 +1,6 @@
-"""DynamoDB implementation of the registry storage."""
 import json
 import logging
-
 from typing import Any, cast
-import boto3
-from boto3.dynamodb.conditions import Attr
 
 from .model import McpServer
 from .storage import AgentRegistryLookup, McpRegistryLookup
@@ -13,22 +9,30 @@ MCP_SERVER_COLUMN = "server"
 ALLOWED_AGENTS_FIELD = "allowed-agents"
 
 
+def _dynamo_resource(region_name: str = "eu-central-1") -> Any:
+    """Lazily import ``boto3`` so consumers that never use DynamoDB don't pay
+    the import cost (boto3 pulls in botocore which is heavy).
+    """
+    import boto3  # noqa: WPS433 - intentional local import
+    return boto3.resource("dynamodb", region_name=region_name)
+
+
 class DynamoDbAgentRegistryLookup(AgentRegistryLookup):
     """DynamoDB-backed storage for agent registry."""
     def __init__(self, agent_card_table: str) -> None:
         """Initializes the DynamoDB agent registry lookup.
 
           Args:
-              agent_card_tabel: The name of the DynamoDB table for agent cards.
+              agent_card_table: The name of the DynamoDB table for agent cards.
           """
-        dynamo = boto3.resource("dynamodb", region_name="eu-central-1")
+        dynamo = _dynamo_resource()
         self.table = dynamo.Table(agent_card_table)
 
     def get_agent_cards(self) -> list[dict[str, Any]]:
-        """Initializes the DynamoDB agent registry lookup.
+        """Retrieves all registered agent cards from DynamoDB.
 
-        Args:
-            agent_card_tabel: The name of the DynamoDB table for agent cards.
+        Returns:
+            A list of agent cards as dictionaries.
         """
         items = self.table.scan().get("Items", [])
         cards: list[dict[str, Any]] = [json.loads(it["card"]) for it in items]
@@ -49,22 +53,23 @@ class DynamoDbAgentRegistryLookup(AgentRegistryLookup):
             return cast(str, item.get("card"))
         return None
 
-    def put_agent_card(self, name: str, card: str, expire_at: str) -> None:
+    def put_agent_card(self, name: str, card: str, expire_at: int) -> None:
         """Registers or updates an agent card in DynamoDB.
 
         Args:
             name: The name of the agent.
             card: The agent card (JSON string).
-            expire_at: Expiration timestamp for the registration.
+            expire_at: Unix-epoch expiration timestamp (seconds). Stored as a
+                Number so DynamoDB TTL can evict expired entries.
         """
         self.table.put_item(Item={"id": name, "card": card, "expireAt": expire_at})
 
-    def update_agent_expiry(self, name: str, expire_at: str) -> None:
+    def update_agent_expiry(self, name: str, expire_at: int) -> None:
         """Updates the expiration timestamp for an agent registration in DynamoDB.
 
         Args:
             name: The name of the agent.
-            expire_at: The new expiration timestamp.
+            expire_at: The new Unix-epoch expiration timestamp (seconds).
         """
         self.table.update_item(
             Key={"id": name},
@@ -81,7 +86,7 @@ class DynamoDbMcpRegistryLookup(McpRegistryLookup):
          Args:
              mcp_table: The name of the DynamoDB table for MCP servers.
          """
-        dynamo = boto3.resource("dynamodb", region_name="eu-central-1")
+        dynamo = _dynamo_resource()
         self.table = dynamo.Table(mcp_table)
 
     def get_mcp_servers(self) -> list[McpServer]:
@@ -207,6 +212,8 @@ class DynamoDbMcpRegistryLookup(McpRegistryLookup):
         Returns:
             A list of McpServer instances.
         """
+        from boto3.dynamodb.conditions import \
+            Attr  # local import: see _dynamo_resource
         response = self.table.scan(
             FilterExpression=Attr(ALLOWED_AGENTS_FIELD).contains(agent_name)
         )

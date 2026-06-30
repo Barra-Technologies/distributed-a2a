@@ -67,7 +67,7 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
-### Start a Agent
+### Start an Agent
 To start an agent, you need to provide an `AgentConfig` which includes information about the agent's capabilities, the LLM it uses, and the registry it should register with.
 
 ```python
@@ -181,9 +181,9 @@ The library uses several environment variables for configuration. These can be s
 | `API_ROOT_PATH` | (Optional) The root path where the agent's API will be hosted. Defaults to `/{agent_name}`. |
 | `HTTPX_LOGGING` | (Optional) Set to `true` to enable detailed logging for HTTP requests. |
 | `REGISTRY_AUTH_HEADERS` | (Optional) A JSON string representing a dictionary of headers to be sent to the registry for authentication (e.g., `'{"Authorization": "Bearer your-token"}'`). |
-| `MCP_AUTH_HEADER` | (Optional) A JSON string representing a dictionary of default headers for MCP server communication. |
-| `MCP_AUTH_HEADER_{SERVICE_NAME}` | (Optional) A JSON string representing a dictionary of headers for a specific MCP service. `{SERVICE_NAME}` should be the uppercase name of the service with hyphens replaced by underscores (e.g., `MCP_AUTH_HEADER_MY_SERVICE` for `my-service`). |
-| `LLM_API_KEY` | (Context-dependent) The environment variable name specified in `AgentConfig.agent.llm.api_key_env` (e.g., `OPENAI_API_KEY`) must be set to your LLM provider's API key. |
+| `MCP_AUTH_HEADER` | (Optional) A JSON string representing a dictionary of default headers for MCP server communication. Used as a fallback when `MCP_AUTH_HEADER_{SERVICE_NAME}` is not set. |
+| `MCP_AUTH_HEADER_{SERVICE_NAME}` | (Optional) A JSON string representing a dictionary of headers for a specific MCP service. `{SERVICE_NAME}` should be the uppercase name of the service with hyphens replaced by underscores (e.g., `MCP_AUTH_HEADER_MY_SERVICE` for `my-service`). Takes precedence over `MCP_AUTH_HEADER`. |
+| _LLM API key env var_ | The environment variable whose **name** you set in `AgentConfig.agent.llm.api_key_env` (e.g. `OPENAI_API_KEY`) must hold your LLM provider's API key. The variable name is configurable; there is no hard‑coded `LLM_API_KEY`. |
 
 ### Registry configuration
 The registry service supports multiple storage drivers for persisting agent cards and MCP server information.

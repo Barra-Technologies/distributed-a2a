@@ -140,6 +140,15 @@ class RoutingA2AClient:
         self.max_polls = max_polls
         self.poll_interval = poll_interval
 
+    async def aclose(self) -> None:
+        await self.client.aclose()
+
+    async def __aenter__(self) -> "RoutingA2AClient":
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+        await self.aclose()
+
     async def fetch_initial_card(self) -> None:
         card_resolver = A2ACardResolver(
             self.client, self.initial_url

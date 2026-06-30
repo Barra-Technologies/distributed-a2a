@@ -1,12 +1,13 @@
 import json
 import os
-from typing import Optional, Dict, Any
+from typing import Dict
+
 
 class Settings:
     """Central configuration for environment variables."""
 
     @property
-    def api_root_path(self) -> Optional[str]:
+    def api_root_path(self) -> str | None:
         return os.getenv("API_ROOT_PATH")
 
     @property
@@ -15,44 +16,28 @@ class Settings:
 
     @property
     def registry_auth_headers(self) -> Dict[str, str]:
-        auth_headers_str = os.getenv("REGISTRY_AUTH_HEADERS")
-        headers = {}
-        if auth_headers_str:
-            try:
-                headers = json.loads(auth_headers_str)
-            except json.JSONDecodeError:
-                headers = {}
-
-        return headers
-
-    @property
-    def mcp_auth_headers(self) -> Dict[str, str]:
-        mcp_auth_headers_str = os.getenv("MCP_AUTH_HEADER")
-        headers = {}
-        if mcp_auth_headers_str:
-            try:
-                headers = json.loads(mcp_auth_headers_str)
-            except json.JSONDecodeError:
-                headers = {}
-
-        return headers
+        return _parse_json_env("REGISTRY_AUTH_HEADERS")
 
     def get_mcp_auth_headers(self, service_name: str) -> Dict[str, str]:
         env_var_name = f"MCP_AUTH_HEADER_{service_name.upper().replace('-', '_')}"
-        mcp_auth_headers_str = os.getenv(env_var_name)
-        if not mcp_auth_headers_str:
-            mcp_auth_headers_str = os.getenv("MCP_AUTH_HEADER")
+        headers = _parse_json_env(env_var_name)
+        return headers or _parse_json_env("MCP_AUTH_HEADER")
 
-        headers = {}
-        if mcp_auth_headers_str:
-            try:
-                headers = json.loads(mcp_auth_headers_str)
-            except json.JSONDecodeError:
-                headers = {}
-
-        return headers
-
-    def get_env_var(self, name: str, default: Optional[str] = None) -> Optional[str]:
+    def get_env_var(self, name: str, default: str | None = None) -> str | None:
         return os.getenv(name, default)
+
+
+def _parse_json_env(name: str) -> Dict[str, str]:
+    raw = os.getenv(name)
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): str(v) for k, v in value.items()}
+
 
 settings = Settings()

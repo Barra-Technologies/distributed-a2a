@@ -4,11 +4,11 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCard, AgentSkill
 from fastapi import FastAPI
 
-from .executors import RoutingExecutor
 from .config import settings
+from .executors import RoutingExecutor
 from .model import RouterConfig
 from .registry import AgentRegistryLookupClient
-from .server import CAPABILITIES
+from .server import CAPABILITIES, _name_to_slug
 
 
 def load_router(router_config: RouterConfig) -> FastAPI:
@@ -42,7 +42,7 @@ def load_router(router_config: RouterConfig) -> FastAPI:
     )
 
 
-    root_path = settings.api_root_path or f"/{router_config.router.card.name.replace(" ", "_").lower()}"
+    root_path = settings.api_root_path or f"/{_name_to_slug(router_config.router.card.name)}"
     if root_path == "/":
         root_path = ""
 
@@ -53,4 +53,4 @@ def load_router(router_config: RouterConfig) -> FastAPI:
             task_store=InMemoryTaskStore()  # TODO replace with dynamodb store
 
         )).build(title=agent_card.name,
-                 root_path=f"/{router_config.router.card.name.replace(" ", "_").lower()}")
+                 root_path=root_path)

@@ -1,2 +1,4 @@
 include README.md
 include LICENSE
+include distributed_a2a/py.typed
+recursive-include distributed_a2a/schemas *.json

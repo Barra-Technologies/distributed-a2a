@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, cast
 
 from a2a.types import TaskState
 from langchain.agents import create_agent
@@ -9,11 +9,17 @@ from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel, Field
-from .model import get_model, LLMConfig
+
+from .model import LLMConfig, get_model
 
 
 class AgentResponse(BaseModel):
-    status: Literal[TaskState.rejected, TaskState.completed, TaskState.failed] = Field(
+    status: Literal[
+        TaskState.rejected,
+        TaskState.completed,
+        TaskState.failed,
+        TaskState.input_required,
+    ] = Field(
         description=(
             f'You should select status as {TaskState.rejected} for requests that fall outside your area of expertise.'
             f'You should select status as {TaskState.completed} if the request is fully addressed and no further input is needed. '
@@ -24,8 +30,8 @@ class AgentResponse(BaseModel):
 
 
 class RoutingResponse(AgentResponse):
-    agent_name: Optional[str] = Field(default=None, description="The agent_name of the agent to be routed to")
-    message: Optional[str] = Field(default=None, description="The answer, answered by the routing agent")
+    agent_name: str | None = Field(default=None, description="The agent_name of the agent to be routed to")
+    message: str | None = Field(default=None, description="The answer, answered by the routing agent")
 
 
 class StringResponse(AgentResponse):
@@ -34,8 +40,15 @@ class StringResponse(AgentResponse):
 
 class StatusAgent[ResponseT: AgentResponse]:
 
-    def __init__(self, llm_config: LLMConfig, name: str, system_prompt: str, api_key: str, is_routing: bool,
-                 tools: list[BaseTool], checkpointer: Optional[BaseCheckpointSaver[Any]] = None):
+    def __init__(self,
+                 llm_config: LLMConfig,
+                 name: str,
+                 system_prompt: str,
+                 api_key: str,
+                 is_routing: bool,
+                 tools: list[BaseTool],
+                 checkpointer: BaseCheckpointSaver[Any] | None = None):
+
         response_format: type[AgentResponse]
         if is_routing:
             response_format = RoutingResponse
@@ -47,7 +60,7 @@ class StatusAgent[ResponseT: AgentResponse]:
             try:
                 saver = MemorySaver()
             except Exception as e:
-                logging.warning(f"Failed to initialize DynamoDBSaver: {e}. Falling back to no checkpointer.")
+                logging.warning(f"Failed to initialize MemorySaver: {e}. Falling back to no checkpointer.")
                 saver = None
 
         self.agent = create_agent(
@@ -62,8 +75,15 @@ class StatusAgent[ResponseT: AgentResponse]:
             name=name
         )
 
-    async def __call__(self, message: str, context_id: Optional[str] = None) -> ResponseT:
-        config: RunnableConfig = RunnableConfig(configurable={'thread_id': context_id})
-        response = await self.agent.ainvoke({"messages": [HumanMessage(content=message)]}, config)
+    async def __call__(self,
+                       message: str,
+                       context_id: str | None = None) -> ResponseT:
+        config: RunnableConfig = RunnableConfig(
+            configurable={'thread_id': context_id}
+        )
+        response = await self.agent.ainvoke(
+            {"messages": [HumanMessage(content=message)]},
+            config
+        )
         logging.info("agent response: %s", response)
         return cast(ResponseT, response['structured_response'])

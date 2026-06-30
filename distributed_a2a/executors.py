@@ -1,7 +1,6 @@
 import json
 import logging
-from logging import Logger
-from typing import Any, Optional
+from typing import Any
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -17,7 +16,7 @@ from .config import settings
 from .model import AgentConfig, RouterConfig
 from .registry import AgentRegistryLookupClient, McpRegistryLookup
 
-logger: Logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class RoutingFailed(Exception):
@@ -54,10 +53,11 @@ See below for your role and scope:
 
 class RoutingAgentExecutor(AgentExecutor):
 
-    def __init__(self, agent_config: AgentConfig, agent_registry: AgentRegistryLookupClient,
+    def __init__(self, agent_config: AgentConfig,
+                 agent_registry: AgentRegistryLookupClient,
                  tools: list[BaseTool] | None = None,
-                 routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None,
-                 specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None):
+                 routing_checkpointer: BaseCheckpointSaver[Any] | None = None,
+                 specialized_checkpointer: BaseCheckpointSaver[Any] | None = None):
         super().__init__()
         api_key = settings.get_env_var(agent_config.agent.llm.api_key_env)
         if api_key is None:
@@ -68,8 +68,9 @@ class RoutingAgentExecutor(AgentExecutor):
         if not self.auth_headers.get("x-api-key"):
             logger.warning("No A2A API key found for registry communication")
 
+        registry_url = mcp.url if (mcp := agent_config.agent.registry and agent_config.agent.registry.mcp) else ""
         self.mcp_registry = McpRegistryLookup(
-            registry_url=agent_config.agent.registry.mcp.url if agent_config.agent.registry and agent_config.agent.registry.mcp else "",
+            registry_url=registry_url,
             req_opts={
                 **settings.registry_auth_headers,
                 "Accept": "application/json"
@@ -77,6 +78,7 @@ class RoutingAgentExecutor(AgentExecutor):
         self.agent_config = agent_config
         self.registered_tools: dict[str, Any] = {}
         self.api_key = api_key
+        self.specialized_checkpointer = specialized_checkpointer
         self.agent_registry = agent_registry
         self.agent = StatusAgent[StringResponse](
             llm_config=agent_config.agent.llm,
@@ -107,10 +109,12 @@ class RoutingAgentExecutor(AgentExecutor):
 
         try:
             # set status to processing
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(state=TaskState.working),
-                                                                  final=False,
-                                                                  context_id=context.context_id,
-                                                                  task_id=context.task_id))
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(
+                status=TaskStatus(state=TaskState.working),
+                final=False,
+                context_id=context.context_id,
+                task_id=context.task_id
+            ))
             await self.reinitialize_agent_with_tools()
             agent_response: StringResponse = await self.agent(message=context.get_user_input(),
                                                               context_id=context.context_id)
@@ -120,15 +124,20 @@ class RoutingAgentExecutor(AgentExecutor):
                 artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
             else:
                 logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
-                artifact = new_text_artifact(name='current_result', description='Result of request to agent.',
-                                             text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}")
+                artifact = new_text_artifact(
+                    name='current_result',
+                    description='Result of request to agent.',
+                    text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}"
+                )
 
             # publish actual result
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
-                                                                    context_id=context.context_id,
-                                                                    task_id=context.task_id,
-                                                                    last_chunk=True,
-                                                                    artifact=artifact))
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+                append=False,
+                context_id=context.context_id,
+                task_id=context.task_id,
+                last_chunk=True,
+                artifact=artifact)
+            )
             # set and publish the final status
             await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
                 state=TaskState(agent_response.status)),
@@ -137,13 +146,18 @@ class RoutingAgentExecutor(AgentExecutor):
                 task_id=context.task_id))
         except RoutingFailed as e:
             logger.error(f"Routing failed for context {context.context_id}: {e.message}")
-            artifact = new_text_artifact(name='routing_error', description='Error message for routing failure.',
-                                         text=e.message)
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
-                                                                    context_id=context.context_id,
-                                                                    task_id=context.task_id,
-                                                                    last_chunk=True,
-                                                                    artifact=artifact))
+            error_artifact = new_text_artifact(
+                name='routing_error',
+                description='Error message for routing failure.',
+                text=e.message
+            )
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+                append=False,
+                context_id=context.context_id,
+                task_id=context.task_id,
+                last_chunk=True,
+                artifact=error_artifact
+            ))
             await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
                 state=TaskState.failed),
                 final=True,
@@ -151,6 +165,18 @@ class RoutingAgentExecutor(AgentExecutor):
                 task_id=context.task_id))
         except Exception as e:
             logger.error(f"Error executing agent task for context {context.context_id}: {e}", )
+            error_artifact = new_text_artifact(
+                name='current_result',
+                description='Unexpected error while executing the agent task.',
+                text=f"*{self.agent_config.agent.card.name}* failed to process the request: {e}",
+            )
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+                append=False,
+                context_id=context.context_id,
+                task_id=context.task_id,
+                last_chunk=True,
+                artifact=error_artifact,
+            ))
             await event_queue.enqueue_event(TaskStatusUpdateEvent(
                 status=TaskStatus(state=TaskState.failed),
                 final=True,
@@ -172,11 +198,12 @@ class RoutingAgentExecutor(AgentExecutor):
 
         self.agent = StatusAgent[StringResponse](
             llm_config=self.agent_config.agent.llm,
-            system_prompt=self.agent_config.agent.system_prompt,
+            system_prompt=GENERAL_SYSTEM_PROMPT + self.agent_config.agent.system_prompt,
             name=self.agent_config.agent.card.name,
             api_key=self.api_key,
             is_routing=False,
             tools=mcp_tools,
+            checkpointer=self.specialized_checkpointer,
         )
 
 
@@ -212,11 +239,13 @@ class RoutingExecutor(AgentExecutor):
             artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
 
             # publish actual result
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
-                                                                    context_id=context.context_id,
-                                                                    task_id=context.task_id,
-                                                                    last_chunk=True,
-                                                                    artifact=artifact))
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+                append=False,
+                context_id=context.context_id,
+                task_id=context.task_id,
+                last_chunk=True,
+                artifact=artifact
+            ))
             # set and publish the final status
             await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
                 state=TaskState.completed),
@@ -225,26 +254,44 @@ class RoutingExecutor(AgentExecutor):
                 task_id=context.task_id))
         except RoutingFailed as e:
             logger.error(f"Routing failed for context {context.context_id}: {e.message}")
-            artifact = new_text_artifact(name='routing_error', description='Error message for routing failure.',
-                                         text=e.message)
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(append=False,
-                                                                    context_id=context.context_id,
-                                                                    task_id=context.task_id,
-                                                                    last_chunk=True,
-                                                                    artifact=artifact))
+            artifact = new_text_artifact(
+                name='routing_error',
+                description='Error message for routing failure.',
+                text=e.message
+            )
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+                append=False,
+                context_id=context.context_id,
+                task_id=context.task_id,
+                last_chunk=True,
+                artifact=artifact))
             await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
                 state=TaskState.failed),
                 final=True,
                 context_id=context.context_id,
-                task_id=context.task_id))
+                task_id=context.task_id
+            ))
 
         except Exception as e:
             logger.error(f"Error executing agent task for context {context.context_id}: {e}")
+            error_artifact = new_text_artifact(
+                name='routing_error',
+                description='Unexpected error while executing the routing task.',
+                text=f"Routing failed: {e}",
+            )
+            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+                append=False,
+                context_id=context.context_id,
+                task_id=context.task_id,
+                last_chunk=True,
+                artifact=error_artifact,
+            ))
             await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
                 state=TaskState.failed),
                 final=True,
                 context_id=context.context_id,
-                task_id=context.task_id))
+                task_id=context.task_id
+            ))
 
 
 async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingResponse],

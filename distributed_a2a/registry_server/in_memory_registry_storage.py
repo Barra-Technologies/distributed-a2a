@@ -1,8 +1,9 @@
 """In-memory storage implementation for agent and MCP registries."""
 import json
 from typing import Any
+
 from .model import McpServer
-from .storage import McpRegistryLookup, AgentRegistryLookup
+from .storage import AgentRegistryLookup, McpRegistryLookup
 
 
 class InMemoryMcpRegistry(McpRegistryLookup):
@@ -69,14 +70,14 @@ class InMemoryAgentRegistry(AgentRegistryLookup):
         agent_data = self._agents.get(name)
         return agent_data["card"] if agent_data else None
 
-    def put_agent_card(self, name: str, card: str, expire_at: str) -> None:
+    def put_agent_card(self, name: str, card: str, expire_at: int) -> None:
         """Registers or updates an agent card."""
         self._agents[name] = {
             "card": card,
             "expire_at": expire_at
         }
 
-    def update_agent_expiry(self, name: str, expire_at: str) -> None:
+    def update_agent_expiry(self, name: str, expire_at: int) -> None:
         """Updates the expiration timestamp for an agent registration."""
         if name in self._agents:
             self._agents[name]["expire_at"] = expire_at

@@ -1,6 +1,4 @@
-import random
 import threading
-import time
 from http.server import HTTPServer
 from typing import Generator
 
@@ -12,7 +10,7 @@ from distributed_a2a.client import RoutingA2AClient
 from distributed_a2a.registry_server.bootstrap import load_registry
 from distributed_a2a.registry_server.in_memory_registry_storage import (
     InMemoryAgentRegistry, InMemoryMcpRegistry)
-from tests.fake_agent import FakeAgent
+from tests.fake_agent import FakeAgent, _free_port, wait_for_http
 from tests.fake_llm import get_llm_handler
 
 FINAL_RESPONSE = "Hello! This is a mock response from the fake OpenAI server."
@@ -24,12 +22,14 @@ def fake_completed_llm() -> Generator[str, None, None]:
 
 
 def fake_llm_server(state: TaskState, response: str) -> Generator[str, None, None]:
-    port = random.randint(10000, 60000)
+    port = _free_port()
     # noinspection PyTypeChecker
     server = HTTPServer(('127.0.0.1', port), get_llm_handler(state, response))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(1)
+    # The stdlib HTTPServer binds before serve_forever, so the socket is
+    # already accepting connections; a single readiness probe is enough.
+    wait_for_http(f"http://127.0.0.1:{port}/", timeout=5.0)
     yield f"http://127.0.0.1:{port}/v1"
     server.shutdown()
     thread.join(timeout=5)
@@ -37,7 +37,7 @@ def fake_llm_server(state: TaskState, response: str) -> Generator[str, None, Non
 
 @pytest.fixture(scope="module")
 def fake_registry_server() -> Generator[str, None, None]:
-    port = 8082
+    port = _free_port()
     agent_registry = InMemoryAgentRegistry()
     mcp_registry = InMemoryMcpRegistry()
     app = load_registry(agent_registry, mcp_registry)
@@ -46,7 +46,7 @@ def fake_registry_server() -> Generator[str, None, None]:
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    time.sleep(1)
+    wait_for_http(f"http://127.0.0.1:{port}/health", timeout=10.0)
 
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True

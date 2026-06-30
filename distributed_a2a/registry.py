@@ -15,7 +15,9 @@ if settings.httpx_logging:
     logging.getLogger("httpx").setLevel(logging.DEBUG)
 
 
-async def registry_heart_beat(name: str, registry: 'AgentRegistryLookupClient', agent_card: AgentCard,
+async def registry_heart_beat(name: str,
+                              registry: 'AgentRegistryLookupClient',
+                              agent_card: AgentCard,
                               interval_sec: int,
                               get_expire_at: Callable[[], int]) -> None:
     """Periodically sends heartbeats to the registry to keep the agent registration alive.
@@ -27,7 +29,10 @@ async def registry_heart_beat(name: str, registry: 'AgentRegistryLookupClient', 
         interval_sec: The interval in seconds between heartbeats.
         get_expire_at: The next expiration timestamp.
     """
-    registry.put_agent_card(name=name, agent_card=agent_card.model_dump(), expire_at=get_expire_at())
+    agent_card_dump = agent_card.model_dump()
+    registry.put_agent_card(name=name,
+                            agent_card=agent_card_dump,
+                            expire_at=get_expire_at())
     while True:
         try:
             registry.patch_agent_expiry(name=name, expire_at=get_expire_at())
@@ -39,17 +44,15 @@ async def registry_heart_beat(name: str, registry: 'AgentRegistryLookupClient', 
 class AgentRegistryLookupClient:
     """Client for looking up agent information in the registry."""
 
-    def __init__(self, registry_url: str, req_opts: dict[str, str] = {}):
+    def __init__(self, registry_url: str, req_opts: dict[str, str] | None = None):
         """Initializes the AgentRegistryLookup client.
 
         Args:
             registry_url: The base URL of the registry service.
             req_opts: Optional dictionary of HTTP headers for requests.
         """
-        if req_opts is None:
-            req_opts = {}
         self.registry_url = registry_url
-        self.client = httpx.Client(headers=req_opts, timeout=30)
+        self.client = httpx.Client(headers=req_opts or {}, timeout=30)
 
     def get_agent_cards(self) -> list[dict[str, Any]]:
         """Retrieves all registered agent cards.
@@ -102,11 +105,11 @@ class AgentRegistryLookupClient:
         Args:
             name: The name of the agent.
             agent_card: The agent card dictionary.
-            expire_at: Expiration timestamp for the registration.
+            expire_at: Unix-epoch expiration timestamp (seconds) for the registration.
         """
         response = self.client.put(
             url=f"{self.registry_url}/agent-card/{name}",
-            params={"expire_at": str(expire_at)},
+            params={"expire_at": expire_at},
             json=agent_card,
         )
         try:
@@ -122,11 +125,11 @@ class AgentRegistryLookupClient:
 
         Args:
             name: The name of the agent.
-            expire_at: The new expiration timestamp.
+            expire_at: The new Unix-epoch expiration timestamp (seconds).
         """
         response = self.client.patch(
             url=f"{self.registry_url}/agent-card/{name}/heartbeat",
-            params={"expire_at": str(expire_at)},
+            params={"expire_at": expire_at},
         )
         try:
             response.raise_for_status()
@@ -151,17 +154,15 @@ class AgentRegistryLookupClient:
 class McpRegistryLookup:
     """Client for looking up MCP server information in the registry."""
 
-    def __init__(self, registry_url: str, req_opts: dict[str, str] = {}):
+    def __init__(self, registry_url: str, req_opts: dict[str, str] | None = None):
         """Initializes the McpRegistryLookup client.
 
         Args:
             registry_url: The base URL of the registry service.
             req_opts: Optional dictionary of HTTP headers for requests.
         """
-        if req_opts is None:
-            req_opts = {}
         self.registry_url = registry_url
-        self.client = httpx.Client(timeout=30, headers=req_opts)
+        self.client = httpx.Client(timeout=30, headers=req_opts or {})
 
     def get_mcp_tool_for_agent(self, agent_name: str) -> list[dict[str, Any]]:
         """Retrieves MCP servers associated with a specific agent.

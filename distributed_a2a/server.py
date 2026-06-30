@@ -1,73 +1,66 @@
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator
 
-import boto3
 from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import AgentSkill, \
-    AgentCapabilities, AgentCard
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from fastapi import FastAPI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from .config import settings
 from .executors import RoutingAgentExecutor
 from .model import AgentConfig
-from .registry import registry_heart_beat, AgentRegistryLookupClient
+from .registry import AgentRegistryLookupClient, registry_heart_beat
 
 CAPABILITIES = AgentCapabilities(streaming=False, push_notifications=False)
 
 HEART_BEAT_INTERVAL_SEC = 5
 MAX_HEART_BEAT_MISSES = 3
 
+
 def get_expire_at() -> int:
     return int(time.time() + MAX_HEART_BEAT_MISSES * HEART_BEAT_INTERVAL_SEC)
 
 
-
-async def heart_beat(name: str, agent_card_table: str, agent_card: AgentCard) -> None:
-    table = boto3.resource("dynamodb", region_name="eu-central-1").Table(agent_card_table)
-    table.put_item(Item={"id": name, "card": agent_card.model_dump_json(), "expireAt": get_expire_at()})
-    while True:
-        await asyncio.sleep(HEART_BEAT_INTERVAL_SEC)
-        table.update_item(
-            Key={"id": name},
-            UpdateExpression="SET expireAt = :expire_at",
-            ExpressionAttributeValues={":expire_at": get_expire_at()}
-        )
+def _name_to_slug(name: str) -> str:
+    """Normalize an agent/router name into a URL path segment."""
+    return name.replace(" ", "_").lower()
 
 
 def get_agent_card(agent_config: AgentConfig) -> AgentCard:
+    config_card = agent_config.agent.card
     skills = [AgentSkill(
         id=skill.id,
         name=skill.name,
         description=skill.description,
         tags=skill.tags,
-        examples=skill.examples)
-    for skill in agent_config.agent.card.skills]
+        examples=skill.examples) for skill in config_card.skills]
     skills.append(AgentSkill(
         id='routing',
         name='Agent routing',
         description='Identifies the most suitable agent for the given task and returns the agent card',
         tags=['agent', 'routing']
     ))
-
     agent_card = AgentCard(
-        name=agent_config.agent.card.name,
-        description=agent_config.agent.card.description,
-        url=agent_config.agent.card.url,
-        version=agent_config.agent.card.version,
-        default_input_modes=agent_config.agent.card.default_input_modes,
-        default_output_modes=agent_config.agent.card.default_output_modes,
+        name=config_card.name,
+        description=config_card.description,
+        url=config_card.url,
+        version=config_card.version,
+        default_input_modes=config_card.default_input_modes,
+        default_output_modes=config_card.default_output_modes,
         skills=skills,
-        preferred_transport=agent_config.agent.card.preferred_transport_protocol,
+        preferred_transport=config_card.preferred_transport_protocol,
         capabilities=CAPABILITIES
     )
     return agent_card
 
-def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheckpointSaver[Any]] = None, specialized_checkpointer: Optional[BaseCheckpointSaver[Any]] = None) -> FastAPI:
+
+def load_app(agent_config: AgentConfig,
+             routing_checkpointer: BaseCheckpointSaver[Any] | None = None,
+             specialized_checkpointer: BaseCheckpointSaver[Any] | None = None) -> FastAPI:
     agent_card = get_agent_card(agent_config)
     req_opts = settings.registry_auth_headers
 
@@ -82,14 +75,25 @@ def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheck
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None, Any]:
-        asyncio.create_task(registry_heart_beat(name=agent_card.name, registry=agent_registry,
-                                                agent_card=agent_card, interval_sec=HEART_BEAT_INTERVAL_SEC,
-                                                get_expire_at=get_expire_at))
+        heartbeat_task = asyncio.create_task(
+            registry_heart_beat(
+                name=agent_card.name,
+                registry=agent_registry,
+                agent_card=agent_card,
+                interval_sec=HEART_BEAT_INTERVAL_SEC,
+                get_expire_at=get_expire_at,
+            )
+        )
+        try:
+            yield
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
-        yield
-
-
-    root_path = settings.api_root_path or f"/{agent_config.agent.card.name.replace(' ', '_').lower()}"
+    root_path = settings.api_root_path or f"/{_name_to_slug(agent_config.agent.card.name)}"
     if root_path == "/":
         root_path = ""
 
@@ -97,6 +101,6 @@ def load_app(agent_config: AgentConfig, routing_checkpointer: Optional[BaseCheck
         agent_card=agent_card,
         http_handler=DefaultRequestHandler(
             agent_executor=executor,
-            task_store=InMemoryTaskStore() #TODO replace with dynamodb store
+            task_store=InMemoryTaskStore()  # TODO: replace with dynamodb store
 
         )).build(title=agent_card.name, lifespan=lifespan, root_path=root_path)
