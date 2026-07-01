@@ -4,48 +4,20 @@ from typing import Any
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import (Artifact, FilePart, FileWithBytes, Part,
-                       TaskArtifactUpdateEvent, TaskState, TaskStatus,
-                       TaskStatusUpdateEvent)
+from a2a.types import (Artifact, FilePart, Part, TaskArtifactUpdateEvent,
+                       TaskState, TaskStatus, TaskStatusUpdateEvent)
 from a2a.utils import new_text_artifact
-from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from mcp.types import BlobResourceContents, EmbeddedResource, ImageContent
 
 from .agent import RoutingResponse, StatusAgent, StringResponse
 from .config import settings
+from .files import extract_file_parts
 from .model import AgentConfig, RouterConfig
 from .registry import AgentRegistryLookupClient, McpRegistryLookup
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_file_parts(messages: list[BaseMessage]) -> list[tuple[str, FilePart]]:
-    out: list[tuple[str, FilePart]] = []
-    for message in messages:
-        if not isinstance(message, ToolMessage):
-            continue
-        artifact = getattr(message, "artifact", None)
-        if not artifact:
-            continue
-        for block in artifact:
-            if isinstance(block, EmbeddedResource) and isinstance(block.resource, BlobResourceContents):
-                uri_str = str(block.resource.uri)
-                name = uri_str.rsplit("/", 1)[-1] or "file.bin"
-                out.append((name, FilePart(file=FileWithBytes(
-                    name=name,
-                    mime_type=block.resource.mimeType or "application/octet-stream",
-                    bytes=block.resource.blob,
-                ))))
-            elif isinstance(block, ImageContent):
-                out.append(("image", FilePart(file=FileWithBytes(
-                    name="image",
-                    mime_type=block.mimeType,
-                    bytes=block.data,
-                ))))
-    return out
 
 
 class RoutingFailed(Exception):
@@ -155,7 +127,7 @@ class RoutingAgentExecutor(AgentExecutor):
                 artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
             else:
                 logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
-                file_parts = _extract_file_parts(invocation.messages)
+                file_parts = extract_file_parts(invocation.messages)
                 artifact = new_text_artifact(
                     name='current_result',
                     description='Result of request to agent.',
