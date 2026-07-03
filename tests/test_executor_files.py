@@ -12,9 +12,16 @@ from a2a.types import Message as A2AMessage
 from a2a.types import (MessageSendParams, Part, Role, TaskArtifactUpdateEvent,
                        TaskState, TaskStatusUpdateEvent, TextPart)
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
+from mcp.types import BlobResourceContents, EmbeddedResource
+from pydantic import AnyUrl
 
 from distributed_a2a.agent import AgentInvocation, StringResponse
 from distributed_a2a.executors import RoutingAgentExecutor
+from distributed_a2a.mcp_interceptors import NON_TEXT_CONTENT_KEY
+
+_DOCX_MIME = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
 
 
 class _StubStatusAgent:
@@ -206,6 +213,66 @@ async def test_executor_emits_one_file_event_per_file_block() -> None:
     assert isinstance(file_b_part.file, FileWithBytes)
     assert file_b_part.file.name == "cv-b.docx"
     assert file_b_part.file.bytes == b64_b
+
+    assert text_event.last_chunk is True
+    assert text_event.artifact.name == "current_result"
+
+    final_status = [e for e in events
+                    if isinstance(e, TaskStatusUpdateEvent) and e.final]
+    assert len(final_status) == 1
+    assert final_status[0].status.state == TaskState.completed
+
+
+@pytest.mark.asyncio
+async def test_executor_emits_file_part_from_interceptor_artifact_shape() -> None:
+    docx_b64 = base64.b64encode(b"PK\x03\x04 hidden bytes").decode("ascii")
+    embedded = EmbeddedResource(
+        type="resource",
+        resource=BlobResourceContents(
+            uri=AnyUrl("cv://cv-carol.docx"), mimeType=_DOCX_MIME, blob=docx_b64,
+        ),
+    )
+    summary_json = (
+        '{"filename": "cv-carol.docx", '
+        f'"mime_type": "{_DOCX_MIME}", "size_bytes": 42}}'
+    )
+    tool_msg = ToolMessage(
+        content=summary_json,
+        tool_call_id="call-cv",
+        artifact={"structured_content": {NON_TEXT_CONTENT_KEY: [embedded]}},
+    )
+
+    executor = RoutingAgentExecutor.__new__(RoutingAgentExecutor)
+    executor.agent_config = SimpleNamespace(  # type: ignore[assignment]
+        agent=SimpleNamespace(card=SimpleNamespace(name="cv-agent")),
+    )
+    executor.agent = _StubStatusAgent(  # type: ignore[assignment]
+        StringResponse(status=TaskState.completed,
+                       response="Here is your CV."),
+        [HumanMessage(content="render a CV please"), tool_msg],
+    )
+
+    async def _noop_reinit() -> None:
+        return None
+
+    executor.reinitialize_agent_with_tools = _noop_reinit  # type: ignore[method-assign]
+
+    ctx = _make_request_context()
+    queue = EventQueue()
+    await executor.execute(ctx, queue)
+    events = await _drain_queue(queue)
+
+    artifact_events = [e for e in events if isinstance(e, TaskArtifactUpdateEvent)]
+    assert len(artifact_events) == 2
+    file_event, text_event = artifact_events
+    assert file_event.last_chunk is False
+    assert file_event.artifact.name == "cv-carol.docx"
+    file_part = file_event.artifact.parts[0].root
+    assert isinstance(file_part, FilePart)
+    assert isinstance(file_part.file, FileWithBytes)
+    assert file_part.file.name == "cv-carol.docx"
+    assert file_part.file.mime_type == _DOCX_MIME
+    assert file_part.file.bytes == docx_b64
 
     assert text_event.last_chunk is True
     assert text_event.artifact.name == "current_result"

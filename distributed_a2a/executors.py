@@ -13,7 +13,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from .agent import RoutingResponse, StatusAgent, StringResponse
 from .config import settings
-from .files import extract_file_parts
+from .file_extractors import extract_file_parts
+from .mcp_interceptors import hide_binary_content_from_llm
 from .model import AgentConfig, RouterConfig
 from .registry import AgentRegistryLookupClient, McpRegistryLookup
 
@@ -206,10 +207,18 @@ class RoutingAgentExecutor(AgentExecutor):
             return
 
         logger.info(f"Agent {self.agent_config.agent.card.name} has access to the following tools: {mcp_server_raw}")
-        mcp_servers = {tool["name"]: {"url": tool["url"], "transport": tool["protocol"],
-                                      "headers": settings.get_mcp_auth_headers(tool["name"])} for tool in
-                       mcp_server_raw}
-        mcp_client = MultiServerMCPClient(mcp_servers)  # type: ignore[arg-type]
+        mcp_servers: dict[str, Any] = {
+            tool["name"]: {
+                "url": tool["url"],
+                "transport": tool["protocol"],
+                "headers": settings.get_mcp_auth_headers(tool["name"])
+            }
+            for tool in mcp_server_raw
+        }
+        mcp_client = MultiServerMCPClient(
+            connections=mcp_servers,
+            tool_interceptors=[hide_binary_content_from_llm],
+        )
         mcp_tools = await mcp_client.get_tools()
 
         self.agent = StatusAgent[StringResponse](

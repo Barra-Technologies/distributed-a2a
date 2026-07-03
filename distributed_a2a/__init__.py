@@ -1,4 +1,6 @@
 from .client import A2ATimeoutError, AgentReply, FileRef, RoutingA2AClient
+from .mcp_interceptors import (NON_TEXT_CONTENT_KEY,
+                               hide_binary_content_from_llm)
 from .model import (AgentConfig, AgentItem, CardConfig, LLMConfig,
                     RegistryConfig, RegistryItemConfig, RouterConfig,
                     RouterItem, SkillConfig)
@@ -31,5 +33,7 @@ __all__ = [
     "AgentRegistryClient",
     "McpRegistryClient",
     "InMemoryAgentRegistry",
-    "InMemoryMcpRegistry"
+    "InMemoryMcpRegistry",
+    "hide_binary_content_from_llm",
+    "NON_TEXT_CONTENT_KEY",
 ]
