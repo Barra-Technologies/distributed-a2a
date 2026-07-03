@@ -26,12 +26,12 @@ async def hide_binary_content_from_llm(
         return result
 
     text_blocks: list[TextContent] = []
-    non_text_blocks: list[Any] = []
+    non_text_blocks: list[dict[str, Any]] = []
     for block in result.content:
         if isinstance(block, TextContent):
             text_blocks.append(block)
         else:
-            non_text_blocks.append(block)
+            non_text_blocks.append(block.model_dump(mode="json"))
 
     merged_structured: dict[str, Any] = (
         dict(result.structuredContent) if result.structuredContent else {}

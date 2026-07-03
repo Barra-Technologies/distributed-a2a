@@ -48,35 +48,108 @@ def _extract_from_mcp_blocks(blocks: list[Any]) -> list[tuple[str, FilePart]]:
     out: list[tuple[str, FilePart]] = []
     counters: dict[str, int] = {"attachment": 0, "image": 0}
     for block in blocks:
-        if isinstance(block, EmbeddedResource) and isinstance(block.resource, BlobResourceContents):
-            mime_type = block.resource.mimeType or "application/octet-stream"
-            uri = str(block.resource.uri) if block.resource.uri is not None else ""
-            kind = "image" if mime_type.startswith("image/") else "attachment"
-            if uri:
-                name = _name_from_uri(uri, kind, counters[kind], mime_type)
-            else:
-                name = _synthetic_name(kind, counters[kind], mime_type)
-            counters[kind] += 1
-            out.append((name, FilePart(file=FileWithBytes(
-                name=name, mime_type=mime_type, bytes=block.resource.blob,
-            ))))
-        elif isinstance(block, ImageContent):
-            mime_type = block.mimeType or "application/octet-stream"
-            name = _synthetic_name("image", counters["image"], mime_type)
-            counters["image"] += 1
-            out.append((name, FilePart(file=FileWithBytes(
-                name=name, mime_type=mime_type, bytes=block.data,
-            ))))
-        elif isinstance(block, ResourceLink):
-            mime_type = block.mimeType or "application/octet-stream"
-            uri = str(block.uri)
-            kind = "image" if mime_type.startswith("image/") else "attachment"
-            name = _name_from_uri(uri, kind, counters[kind], mime_type)
-            counters[kind] += 1
-            out.append((name, FilePart(file=FileWithUri(
-                name=name, mime_type=mime_type, uri=uri,
-            ))))
+        result = _mcp_block_to_file_part(block, counters)
+        if result is not None:
+            out.append(result)
     return out
+
+
+def _mcp_block_to_file_part(
+    block: Any, counters: dict[str, int],
+) -> tuple[str, FilePart] | None:
+    # Normalise both shapes into (type_tag, extractor-friendly view).
+    if isinstance(block, EmbeddedResource) and isinstance(
+        block.resource, BlobResourceContents,
+    ):
+        mime_type = block.resource.mimeType or "application/octet-stream"
+        uri = str(block.resource.uri) if block.resource.uri is not None else ""
+        return _blob_resource_to_file_part(
+            mime_type, uri, block.resource.blob, counters,
+        )
+    if isinstance(block, ImageContent):
+        return _image_bytes_to_file_part(
+            block.mimeType or "application/octet-stream", block.data, counters,
+        )
+    if isinstance(block, ResourceLink):
+        return _resource_link_to_file_part(
+            block.mimeType or "application/octet-stream",
+            str(block.uri),
+            counters,
+        )
+
+    if not isinstance(block, dict):
+        return None
+
+    block_type = block.get("type")
+    if block_type == "resource":
+        resource = block.get("resource")
+        if not isinstance(resource, dict):
+            return None
+        blob = resource.get("blob")
+        if not isinstance(blob, str) or not blob:
+            return None
+        mime_type_str = _mime_type_or_default(resource.get("mimeType"))
+        raw_uri = resource.get("uri")
+        uri_str = str(raw_uri) if raw_uri else ""
+        return _blob_resource_to_file_part(
+            mime_type_str, uri_str, blob, counters,
+        )
+    if block_type == "image":
+        data = block.get("data")
+        if not isinstance(data, str) or not data:
+            return None
+        mime_type_str = _mime_type_or_default(block.get("mimeType"))
+        return _image_bytes_to_file_part(mime_type_str, data, counters)
+    if block_type == "resource_link":
+        raw_uri = block.get("uri")
+        if not raw_uri:
+            return None
+        mime_type_str = _mime_type_or_default(block.get("mimeType"))
+        return _resource_link_to_file_part(
+            mime_type_str, str(raw_uri), counters,
+        )
+    return None
+
+
+def _mime_type_or_default(value: Any) -> str:
+    if isinstance(value, str) and value:
+        return value
+    return "application/octet-stream"
+
+
+def _blob_resource_to_file_part(
+    mime_type: str, uri: str, blob: str, counters: dict[str, int],
+) -> tuple[str, FilePart]:
+    kind = "image" if mime_type.startswith("image/") else "attachment"
+    if uri:
+        name = _name_from_uri(uri, kind, counters[kind], mime_type)
+    else:
+        name = _synthetic_name(kind, counters[kind], mime_type)
+    counters[kind] += 1
+    return name, FilePart(file=FileWithBytes(
+        name=name, mime_type=mime_type, bytes=blob,
+    ))
+
+
+def _image_bytes_to_file_part(
+    mime_type: str, data: str, counters: dict[str, int],
+) -> tuple[str, FilePart]:
+    name = _synthetic_name("image", counters["image"], mime_type)
+    counters["image"] += 1
+    return name, FilePart(file=FileWithBytes(
+        name=name, mime_type=mime_type, bytes=data,
+    ))
+
+
+def _resource_link_to_file_part(
+    mime_type: str, uri: str, counters: dict[str, int],
+) -> tuple[str, FilePart]:
+    kind = "image" if mime_type.startswith("image/") else "attachment"
+    name = _name_from_uri(uri, kind, counters[kind], mime_type)
+    counters[kind] += 1
+    return name, FilePart(file=FileWithUri(
+        name=name, mime_type=mime_type, uri=uri,
+    ))
 
 
 def _extract_from_langchain_content_blocks(content: list[Any]) -> list[tuple[str, FilePart]]:
