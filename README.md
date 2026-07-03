@@ -172,6 +172,27 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+### Binary content handling
+
+When an agent invokes an MCP tool that returns non-text content (files, images,
+`EmbeddedResource`, `ResourceLink`), the library keeps those payloads out of the
+LLM's context window and delivers them out-of-band as A2A `FilePart` artifacts.
+
+Concretely, `RoutingAgentExecutor` installs the
+`hide_binary_content_from_llm` tool-call interceptor on every
+`MultiServerMCPClient` it builds. The interceptor moves any non-`TextContent`
+block from `CallToolResult.content` into `CallToolResult.structuredContent`
+under the `non_text_content` key. The upstream adapter then carries that dict
+into `ToolMessage.artifact['structured_content']`, which LangChain does **not**
+surface to the model. After the graph run, the executor walks the message list,
+extracts the stashed blocks, and emits one `TaskArtifactUpdateEvent` per file
+before the terminating text artifact.
+
+Client-side, `RoutingA2AClient.send_message` returns an `AgentReply` that
+exposes both the LLM's text summary and any `FileRef` payloads (with either
+inline `bytes_b64` or a `uri`), so downstream integrations (e.g. Slack file
+uploads) can forward the bytes without ever routing them through a model.
+
 ### Environment Variables
 The library uses several environment variables for configuration. These can be set in your shell or via a `.env` file.
 
