@@ -104,6 +104,13 @@ class RoutingAgentExecutor(AgentExecutor):
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         raise NotImplementedError
 
+    async def aclose(self) -> None:
+        """Close any owned async resources (the MCP registry client)."""
+        try:
+            await self.mcp_registry.aclose()
+        except Exception:
+            logger.warning("Failed to close MCP registry client", exc_info=True)
+
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         if context.context_id is None or context.task_id is None:
             raise ValueError("Context ID and Task ID must be provided.")
@@ -200,7 +207,7 @@ class RoutingAgentExecutor(AgentExecutor):
                 task_id=context.task_id))
 
     async def reinitialize_agent_with_tools(self) -> None:
-        mcp_server_raw = self.mcp_registry.get_mcp_tool_for_agent(self.agent_config.agent.card.name)
+        mcp_server_raw = await self.mcp_registry.get_mcp_tool_for_agent(self.agent_config.agent.card.name)
         if not mcp_server_raw:
             # no mcp tool found no need to reinitialize Agent
             return
@@ -327,7 +334,7 @@ async def _route_request_to_matching_agent(routing_agent: RoutingAgent,
     if agent_name is None:
         raise RoutingFailed(message=routing_agent_response.message if routing_agent_response.message else str(routing_agent_response))
     logger.info(f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.")
-    agent_card: dict[str, Any] | None = agent_registry.get_agent_card(agent_name)
+    agent_card: dict[str, Any] | None = await agent_registry.get_agent_card(agent_name)
     if agent_card is None:
         raise RoutingFailed(message=routing_agent_response.message if routing_agent_response.message else str(routing_agent_response))
     logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")

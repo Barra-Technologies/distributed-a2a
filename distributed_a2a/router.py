@@ -1,3 +1,7 @@
+import logging
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator
+
 from a2a.server.apps import A2ARESTFastAPIApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
@@ -34,13 +38,23 @@ def load_router(router_config: RouterConfig) -> FastAPI:
     if router_config.router.registry and router_config.router.registry.agent:
         agent_registry_url = router_config.router.registry.agent.url
 
+    agent_registry = AgentRegistryLookupClient(agent_registry_url, req_opts=req_opts)
     executor = RoutingExecutor(
         router_config=router_config,
-        agent_registry=AgentRegistryLookupClient(
-            agent_registry_url,
-            req_opts=req_opts)
+        agent_registry=agent_registry,
     )
 
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncGenerator[None, Any]:
+        try:
+            yield
+        finally:
+            try:
+                await agent_registry.aclose()
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Failed to close router agent registry client", exc_info=True
+                )
 
     root_path = settings.api_root_path or f"/{_name_to_slug(router_config.router.card.name)}"
     if root_path == "/":
@@ -53,4 +67,5 @@ def load_router(router_config: RouterConfig) -> FastAPI:
             task_store=InMemoryTaskStore()  # TODO replace with dynamodb store
 
         )).build(title=agent_card.name,
+                 lifespan=lifespan,
                  root_path=root_path)

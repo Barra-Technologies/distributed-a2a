@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
@@ -92,6 +93,18 @@ def load_app(agent_config: AgentConfig,
                 await heartbeat_task
             except (asyncio.CancelledError, Exception):
                 pass
+            try:
+                await agent_registry.aclose()
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Failed to close agent registry client", exc_info=True
+                )
+            try:
+                await executor.aclose()
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Failed to close executor resources", exc_info=True
+                )
 
     root_path = settings.api_root_path or f"/{_name_to_slug(agent_config.agent.card.name)}"
     if root_path == "/":

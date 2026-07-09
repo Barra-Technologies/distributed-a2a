@@ -4,9 +4,8 @@ from .mcp_interceptors import (NON_TEXT_CONTENT_KEY,
 from .model import (AgentConfig, AgentItem, CardConfig, LLMConfig,
                     RegistryConfig, RegistryItemConfig, RouterConfig,
                     RouterItem, SkillConfig)
-from .registry import AgentRegistryLookupClient as AgentRegistryClient
-from .registry import McpRegistryLookup as McpRegistryClient
-from .registry import registry_heart_beat
+from .registry import (AgentRegistryLookupClient, McpRegistryLookup,
+                       registry_heart_beat)
 from .registry_server import (InMemoryAgentRegistry, InMemoryMcpRegistry,
                               load_registry)
 from .router import load_router
@@ -30,8 +29,8 @@ __all__ = [
     "RouterItem",
     "RouterConfig",
     "registry_heart_beat",
-    "AgentRegistryClient",
-    "McpRegistryClient",
+    "AgentRegistryLookupClient",
+    "McpRegistryLookup",
     "InMemoryAgentRegistry",
     "InMemoryMcpRegistry",
     "hide_binary_content_from_llm",

@@ -1,4 +1,3 @@
-"""Registry lookup for agents and MCP servers."""
 import asyncio
 import logging
 from typing import Any, Callable, cast
@@ -30,19 +29,28 @@ async def registry_heart_beat(name: str,
         get_expire_at: The next expiration timestamp.
     """
     agent_card_dump = agent_card.model_dump()
-    registry.put_agent_card(name=name,
-                            agent_card=agent_card_dump,
-                            expire_at=get_expire_at())
+    try:
+        await registry.put_agent_card(name=name,
+                                      agent_card=agent_card_dump,
+                                      expire_at=get_expire_at())
+    except Exception as e:
+        logger.error(f"Failed initial registration with registry: {e}")
     while True:
         try:
-            registry.patch_agent_expiry(name=name, expire_at=get_expire_at())
+            await registry.patch_agent_expiry(name=name, expire_at=get_expire_at())
         except Exception as e:
-            logger.error(f"Failed to send heart beat to registry: {e}")
+            logger.error(f"Failed to send heart beat to registry: {e}. Re-registering.")
+            try:
+                await registry.put_agent_card(name=name,
+                                              agent_card=agent_card_dump,
+                                              expire_at=get_expire_at())
+            except Exception as re:
+                logger.error(f"Re-registration also failed: {re}")
         await asyncio.sleep(interval_sec)
 
 
 class AgentRegistryLookupClient:
-    """Client for looking up agent information in the registry."""
+    """Async client for looking up agent information in the registry."""
 
     def __init__(self, registry_url: str, req_opts: dict[str, str] | None = None):
         """Initializes the AgentRegistryLookup client.
@@ -52,25 +60,29 @@ class AgentRegistryLookupClient:
             req_opts: Optional dictionary of HTTP headers for requests.
         """
         self.registry_url = registry_url
-        self.client = httpx.Client(headers=req_opts or {}, timeout=30)
+        self.client = httpx.AsyncClient(headers=req_opts or {}, timeout=30)
 
-    def get_agent_cards(self) -> list[dict[str, Any]]:
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client."""
+        await self.client.aclose()
+
+    async def get_agent_cards(self) -> list[dict[str, Any]]:
         """Retrieves all registered agent cards.
 
         Returns:
             A list of agent cards as dictionaries.
         """
-        response = self.client.get(url=f"{self.registry_url}/agent-cards")
+        response = await self.client.get(url=f"{self.registry_url}/agent-cards")
         response.raise_for_status()
         return cast(list[dict[str, Any]], response.json())
 
-    def get_agents(self, exclude_agents: list[str] | None = None) -> str:
-        """Retrieves all registered agents for the router.
+    async def get_agents(self, exclude_agents: list[str] | None = None) -> str:
+        """Retrieves all registered agents for the router (LangChain tool entry point).
 
         Returns:
-            A list of agent details for the router.
+            Markdown-formatted list of agents for LLM consumption.
         """
-        agent_cards = self.get_agent_cards()
+        agent_cards = await self.get_agent_cards()
         if exclude_agents is not None:
             agent_cards = [card for card in agent_cards if card.get("name") not in exclude_agents]
         agent_cards_as_markdown = "\n\n\n".join(
@@ -84,7 +96,7 @@ class AgentRegistryLookupClient:
                       for skill in agent_card['skills']]
         return "# Agent:\n" + overall_info + "\n\n".join(skill_info)
 
-    def get_agent_card(self, name: str) -> dict[str, Any] | None:
+    async def get_agent_card(self, name: str) -> dict[str, Any] | None:
         """Retrieves a specific agent card by name.
 
         Args:
@@ -93,13 +105,13 @@ class AgentRegistryLookupClient:
         Returns:
             The agent card as a dictionary, or None if not found.
         """
-        response = self.client.get(url=f"{self.registry_url}/agent-card/{name}")
+        response = await self.client.get(url=f"{self.registry_url}/agent-card/{name}")
         if response.status_code == 404:
             return None
         response.raise_for_status()
         return cast(dict[str, Any] | None, response.json())
 
-    def put_agent_card(self, name: str, agent_card: dict[str, Any], expire_at: int) -> None:
+    async def put_agent_card(self, name: str, agent_card: dict[str, Any], expire_at: int) -> None:
         """Registers or updates an agent card in the registry.
 
         Args:
@@ -107,7 +119,7 @@ class AgentRegistryLookupClient:
             agent_card: The agent card dictionary.
             expire_at: Unix-epoch expiration timestamp (seconds) for the registration.
         """
-        response = self.client.put(
+        response = await self.client.put(
             url=f"{self.registry_url}/agent-card/{name}",
             params={"expire_at": expire_at},
             json=agent_card,
@@ -120,14 +132,14 @@ class AgentRegistryLookupClient:
                 logger.error(f"Response content: {response.text}")
             raise
 
-    def patch_agent_expiry(self, name: str, expire_at: int) -> None:
+    async def patch_agent_expiry(self, name: str, expire_at: int) -> None:
         """Updates the expiration timestamp for an agent registration (heartbeat).
 
         Args:
             name: The name of the agent.
             expire_at: The new Unix-epoch expiration timestamp (seconds).
         """
-        response = self.client.patch(
+        response = await self.client.patch(
             url=f"{self.registry_url}/agent-card/{name}/heartbeat",
             params={"expire_at": expire_at},
         )
@@ -139,20 +151,16 @@ class AgentRegistryLookupClient:
             raise e
 
     def as_tool(self) -> StructuredTool:
-        """Wraps the agent card lookup as a LangChain StructuredTool.
-
-        Returns:
-            A StructuredTool for looking up agent cards.
-        """
+        """Wraps the agent card lookup as a LangChain async StructuredTool."""
         return StructuredTool.from_function(
-            func=self.get_agents,
+            coroutine=self.get_agents,
             name="agent_lookup",
             description="Gets all available agents in the registry. You can provide a list of agent names to exclude."
         )
 
 
 class McpRegistryLookup:
-    """Client for looking up MCP server information in the registry."""
+    """Async client for looking up MCP server information in the registry."""
 
     def __init__(self, registry_url: str, req_opts: dict[str, str] | None = None):
         """Initializes the McpRegistryLookup client.
@@ -162,9 +170,13 @@ class McpRegistryLookup:
             req_opts: Optional dictionary of HTTP headers for requests.
         """
         self.registry_url = registry_url
-        self.client = httpx.Client(timeout=30, headers=req_opts or {})
+        self.client = httpx.AsyncClient(timeout=30, headers=req_opts or {})
 
-    def get_mcp_tool_for_agent(self, agent_name: str) -> list[dict[str, Any]]:
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client."""
+        await self.client.aclose()
+
+    async def get_mcp_tool_for_agent(self, agent_name: str) -> list[dict[str, Any]]:
         """Retrieves MCP servers associated with a specific agent.
 
         Args:
@@ -173,6 +185,6 @@ class McpRegistryLookup:
         Returns:
             A list of MCP server definitions.
         """
-        response = self.client.get(url=f"{self.registry_url}/mcp/agent/{agent_name}/servers")
+        response = await self.client.get(url=f"{self.registry_url}/mcp/agent/{agent_name}/servers")
         response.raise_for_status()
         return cast(list[dict[str, Any]], response.json())
