@@ -49,6 +49,16 @@ class AgentItem(BaseModel):
     card: CardConfig = Field(description="The agent card configuration node")
     llm: LLMConfig = Field(description="The LLM configuration node")
     system_prompt: str = Field(description="The system prompt to use for the LLM or a path to a file containing the system prompt")
+    advertise_routing_skill: bool = Field(
+        default=False,
+        description=(
+            "When True, the agent advertises a `routing` skill on its "
+            "AgentCard in addition to the configured skills. Off by default: "
+            "specialized agents should advertise only the capabilities they "
+            "actually provide, and the implicit reroute-on-rejection happens "
+            "inside the executor regardless of this flag."
+        ),
+    )
 
     def __init__(self, /, **data: Any) -> None:
         prompt_or_path = data['system_prompt']
