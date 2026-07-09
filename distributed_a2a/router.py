@@ -16,20 +16,21 @@ from .server import CAPABILITIES, _name_to_slug
 
 
 def load_router(router_config: RouterConfig) -> FastAPI:
+    card_config = router_config.router.card
     agent_card = AgentCard(
-        name="Router",
-        description="Agent to redirect to the best matching agent based on the agent card",
-        url=router_config.router.card.url,
-        version="1.0.0",
-        default_input_modes=router_config.router.card.default_input_modes,
-        default_output_modes=router_config.router.card.default_output_modes,
+        name=card_config.name,
+        description=card_config.description,
+        url=card_config.url,
+        version=card_config.version,
+        default_input_modes=card_config.default_input_modes,
+        default_output_modes=card_config.default_output_modes,
         skills=[AgentSkill(
             id='routing',
             name='Agent routing',
             description='Identifies the most suitable agent for the given task and returns the agent card',
             tags=['agent', 'routing']
         )],
-        preferred_transport=router_config.router.card.preferred_transport_protocol,
+        preferred_transport=card_config.preferred_transport_protocol,
         capabilities=CAPABILITIES
     )
     req_opts = settings.registry_auth_headers
