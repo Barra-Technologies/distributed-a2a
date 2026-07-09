@@ -8,7 +8,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="distributed_a2a",
-    version="0.1.4",
+    version="0.2.7",
     author="Fabian Bell",
     author_email="fabian.bell@barrabytes.com",
     description="A library for building A2A agents with routing capabilities",

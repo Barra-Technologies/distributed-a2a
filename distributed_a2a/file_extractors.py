@@ -9,6 +9,8 @@ from mcp.types import (BlobResourceContents, EmbeddedResource, ImageContent,
 
 from .mcp_interceptors import NON_TEXT_CONTENT_KEY
 
+DELIVERED_ARTIFACT_KEY = "_a2a_delivered"
+
 _LANGCHAIN_BINARY_BLOCK_TYPES: dict[str, str] = {
     "file": "attachment",
     "image": "image",
@@ -198,17 +200,47 @@ def _mcp_blocks_from_artifact(artifact: Any) -> list[Any] | None:
     return blocks
 
 
-def extract_file_parts(messages: list[BaseMessage]) -> list[tuple[str, FilePart]]:
+def _is_delivered(message: ToolMessage) -> bool:
+    return (
+        isinstance(message.artifact, dict)
+        and message.artifact.get(DELIVERED_ARTIFACT_KEY) is True
+    )
+
+
+def _mark_delivered(message: ToolMessage) -> None:
+    if isinstance(message.artifact, dict):
+        message.artifact[DELIVERED_ARTIFACT_KEY] = True
+    else:
+        message.artifact = {DELIVERED_ARTIFACT_KEY: True}
+
+
+def extract_file_parts(
+    messages: list[BaseMessage],
+) -> tuple[list[tuple[str, FilePart]], list[ToolMessage]]:
+    """Return the file parts to emit and the ``ToolMessage`` instances they
+    came from. Each returned message is flagged in-place with
+    `DELIVERED_ARTIFACT_KEY` so a subsequent call over the same
+    checkpointed history skips it. Callers are expected to persist those
+    mutations back to the checkpoint.
+    """
     parts: list[tuple[str, FilePart]] = []
+    delivered_sources: list[ToolMessage] = []
     for message in messages:
         if not isinstance(message, ToolMessage):
+            continue
+        if _is_delivered(message):
             continue
 
         mcp_blocks = _mcp_blocks_from_artifact(message.artifact)
         if mcp_blocks is not None:
-            parts.extend(_extract_from_mcp_blocks(mcp_blocks))
-            continue
+            msg_parts = _extract_from_mcp_blocks(mcp_blocks)
+        elif isinstance(message.content, list):
+            msg_parts = _extract_from_langchain_content_blocks(message.content)
+        else:
+            msg_parts = []
 
-        if isinstance(message.content, list):
-            parts.extend(_extract_from_langchain_content_blocks(message.content))
-    return parts
+        if msg_parts:
+            parts.extend(msg_parts)
+            _mark_delivered(message)
+            delivered_sources.append(message)
+    return parts, delivered_sources

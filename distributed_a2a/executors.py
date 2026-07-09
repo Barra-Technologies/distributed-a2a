@@ -120,7 +120,7 @@ class RoutingAgentExecutor(AgentExecutor):
             await self.reinitialize_agent_with_tools()
             invocation = await self.agent(message=context.get_user_input(),
                                           context_id=context.context_id)
-            artifact, final_state, file_parts = await self._build_result(invocation, context)
+            artifact, final_state, file_parts, delivered_sources = await self._build_result(invocation, context)
             for name, file_part in file_parts:
                 await event_queue.enqueue_event(TaskArtifactUpdateEvent(
                     append=False,
@@ -135,6 +135,10 @@ class RoutingAgentExecutor(AgentExecutor):
                 ))
             await _emit_artifact(event_queue, context, artifact)
             await _emit_status(event_queue, context, final_state, final=True)
+            if delivered_sources:
+                await self.agent.persist_delivered_messages(
+                    context.context_id, delivered_sources,
+                )
         except RoutingFailed as e:
             logger.error(f"Routing failed for context {context.context_id}: {e.message}")
             await _fail_task(event_queue, context, name='routing_error',
@@ -148,20 +152,20 @@ class RoutingAgentExecutor(AgentExecutor):
 
     async def _build_result(self, invocation: AgentInvocation[StringResponse],
                             context: RequestContext,
-                            ) -> tuple[Artifact, TaskState, list[tuple[str, FilePart]]]:
+                            ) -> tuple[Artifact, TaskState, list[tuple[str, FilePart]], list[Any]]:
         """Build the terminal artifact and state; on ``rejected``, reroute and report ``completed``."""
         agent_response = invocation.structured
         if agent_response.status == TaskState.rejected:
             artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
-            return artifact, TaskState.completed, []
+            return artifact, TaskState.completed, [], []
         logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
-        file_parts = extract_file_parts(invocation.messages)
+        file_parts, delivered_sources = extract_file_parts(invocation.messages)
         artifact = new_text_artifact(
             name='current_result',
             description='Result of request to agent.',
             text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}"
         )
-        return artifact, TaskState(agent_response.status), file_parts
+        return artifact, TaskState(agent_response.status), file_parts, delivered_sources
 
     async def reinitialize_agent_with_tools(self) -> None:
         mcp_server_raw = await self.mcp_registry.get_mcp_tool_for_agent(self.agent_config.agent.card.name)

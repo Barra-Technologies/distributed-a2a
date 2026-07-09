@@ -32,7 +32,9 @@ def test_extract_file_parts_ignores_non_tool_messages_and_string_content() -> No
         AIMessage(content="hello"),
         ToolMessage(content="just text", tool_call_id="c1"),
     ]
-    assert extract_file_parts(messages) == []
+    parts, delivered = extract_file_parts(messages)
+    assert parts == []
+    assert delivered == []
 
 
 def test_extract_file_parts_reads_langchain_file_content_block() -> None:
@@ -57,8 +59,9 @@ def test_extract_file_parts_reads_langchain_file_content_block() -> None:
         artifact={"structured_content": {"filename": "cv-alice.docx"}},
     )
 
-    parts = extract_file_parts([HumanMessage(content="hi"), tool_msg])
+    parts, delivered = extract_file_parts([HumanMessage(content="hi"), tool_msg])
 
+    assert delivered == [tool_msg]
     assert len(parts) == 1
     name, file_part = parts[0]
     assert name == "cv-alice.docx"
@@ -81,8 +84,9 @@ def test_extract_file_parts_reads_langchain_image_content_block() -> None:
         tool_call_id="call-img",
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert len(parts) == 1
     name, file_part = parts[0]
     assert name.startswith("image")
@@ -108,8 +112,9 @@ def test_extract_file_parts_synthesises_name_without_filename_hint() -> None:
         tool_call_id="call-cv",
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert len(parts) == 1
     name, file_part = parts[0]
     assert name.startswith("attachment")
@@ -128,7 +133,9 @@ def test_extract_file_parts_ignores_url_only_file_block() -> None:
         ],
         tool_call_id="call-url-only",
     )
-    assert extract_file_parts([tool_msg]) == []
+    parts, delivered = extract_file_parts([tool_msg])
+    assert parts == []
+    assert delivered == []
 
 
 def test_extract_file_parts_matches_multiple_filenames_by_order() -> None:
@@ -151,8 +158,9 @@ def test_extract_file_parts_matches_multiple_filenames_by_order() -> None:
         tool_call_id="call-multi",
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert [name for name, _ in parts] == ["a.bin", "b.bin"]
     assert parts[0][1].file.bytes == b64_a  # type: ignore[union-attr]
     assert parts[1][1].file.bytes == b64_b  # type: ignore[union-attr]
@@ -176,8 +184,9 @@ def test_extract_file_parts_reads_interceptor_artifact_shape() -> None:
         artifact=_interceptor_artifact([embedded]),
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert len(parts) == 1
     name, file_part = parts[0]
     assert name == "cv-alice.docx"
@@ -208,8 +217,9 @@ def test_extract_file_parts_prefers_interceptor_artifact_over_content_blocks() -
         artifact=_interceptor_artifact([embedded]),
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert len(parts) == 1
     name, file_part = parts[0]
     assert name == "cv-interceptor.docx"
@@ -226,8 +236,9 @@ def test_extract_file_parts_reads_image_content_from_interceptor_artifact() -> N
         artifact=_interceptor_artifact([image]),
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert len(parts) == 1
     name, file_part = parts[0]
     assert name.startswith("image")
@@ -250,8 +261,9 @@ def test_extract_file_parts_reads_resource_link_as_file_with_uri() -> None:
         artifact=_interceptor_artifact([link]),
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert len(parts) == 1
     name, file_part = parts[0]
     assert name == "report.pdf"
@@ -281,8 +293,9 @@ def test_extract_file_parts_reads_multiple_blocks_from_interceptor_artifact() ->
         artifact=_interceptor_artifact([a, b]),
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert [name for name, _ in parts] == ["cv-a.docx", "cv-b.docx"]
     assert parts[0][1].file.bytes == b64_a  # type: ignore[union-attr]
     assert parts[1][1].file.bytes == b64_b  # type: ignore[union-attr]
@@ -300,7 +313,8 @@ def test_extract_file_parts_ignores_empty_interceptor_artifact() -> None:
         tool_call_id="call-mixed",
         artifact={"structured_content": {NON_TEXT_CONTENT_KEY: []}},
     )
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
+    assert delivered == [tool_msg]
     assert len(parts) == 1
 
 
@@ -317,8 +331,9 @@ def test_extract_file_parts_falls_back_to_content_when_artifact_has_no_key() -> 
         artifact={"structured_content": {"unrelated": {"foo": 1}}},
     )
 
-    parts = extract_file_parts([tool_msg])
+    parts, delivered = extract_file_parts([tool_msg])
 
+    assert delivered == [tool_msg]
     assert len(parts) == 1
     name, file_part = parts[0]
     assert name == "cv-fallback.docx"

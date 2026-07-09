@@ -39,10 +39,13 @@ class StringResponse(AgentResponse):
 
 
 class AgentInvocation[ResponseT: AgentResponse](BaseModel):
-    """Structured response plus the raw LangGraph message list.
+    """Structured response plus the raw message list.
 
     ``messages`` lets callers extract ``ToolMessage.artifact`` payloads (e.g.
     binary files from MCP tools) without routing them through the LLM context.
+    Artifacts already delivered on a previous turn are flagged in-place on
+    the ``ToolMessage.artifact`` dict (see `.file_extractors`) so they
+    are skipped by downstream extraction and are not re-sent to the client.
     """
 
     structured: ResponseT
@@ -96,6 +99,27 @@ class StatusAgent[ResponseT: AgentResponse]:
             structured=cast(ResponseT, response['structured_response']),
             messages=list(response.get('messages', [])),
         )
+
+    async def persist_delivered_messages(self,
+                                         context_id: str | None,
+                                         messages: list[BaseMessage]) -> None:
+        """Write ``messages`` back into the checkpoint so the delivered
+        flag set by :func:`.file_extractors.extract_file_parts` survives to
+        the next turn and prevents artifact re-delivery.
+        """
+        if not messages or context_id is None:
+            return
+        config: RunnableConfig = RunnableConfig(
+            configurable={'thread_id': context_id}
+        )
+        try:
+            await self.agent.aupdate_state(config, {"messages": messages})
+        except Exception:
+            logging.warning(
+                "Failed to persist delivered-artifact flag for context %s",
+                context_id,
+                exc_info=True,
+            )
 
 
 class RoutingAgent(StatusAgent[RoutingResponse]):

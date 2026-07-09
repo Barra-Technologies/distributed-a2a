@@ -28,12 +28,17 @@ class _StubStatusAgent:
     def __init__(self, response: StringResponse, messages: list[BaseMessage]) -> None:
         self._response = response
         self._messages = messages
+        self.persisted: list[BaseMessage] = []
 
     async def __call__(self, message: str, context_id: str | None = None) -> AgentInvocation[StringResponse]:
         return AgentInvocation[StringResponse](
             structured=self._response,
             messages=self._messages,
         )
+
+    async def persist_delivered_messages(self, context_id: str | None,
+                                         messages: list[BaseMessage]) -> None:
+        self.persisted.extend(messages)
 
 
 def _make_request_context() -> RequestContext:
