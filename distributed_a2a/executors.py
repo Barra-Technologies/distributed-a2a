@@ -11,8 +11,8 @@ from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from .agent import (RoutingAgent, RoutingResponse, SpecializedAgent,
-                    StringResponse)
+from .agent import (AgentInvocation, RoutingAgent, RoutingResponse,
+                    SpecializedAgent, StringResponse)
 from .config import settings
 from .file_extractors import extract_file_parts
 from .mcp_interceptors import hide_binary_content_from_llm
@@ -116,31 +116,11 @@ class RoutingAgentExecutor(AgentExecutor):
             raise ValueError("Context ID and Task ID must be provided.")
 
         try:
-            # set status to processing
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(
-                status=TaskStatus(state=TaskState.working),
-                final=False,
-                context_id=context.context_id,
-                task_id=context.task_id
-            ))
+            await _emit_status(event_queue, context, TaskState.working, final=False)
             await self.reinitialize_agent_with_tools()
             invocation = await self.agent(message=context.get_user_input(),
                                           context_id=context.context_id)
-            agent_response: StringResponse = invocation.structured
-
-            artifact: Artifact
-            file_parts: list[tuple[str, FilePart]] = []
-            if agent_response.status == TaskState.rejected:
-                artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
-            else:
-                logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
-                file_parts = extract_file_parts(invocation.messages)
-                artifact = new_text_artifact(
-                    name='current_result',
-                    description='Result of request to agent.',
-                    text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}"
-                )
-
+            artifact, final_state, file_parts = await self._build_result(invocation, context)
             for name, file_part in file_parts:
                 await event_queue.enqueue_event(TaskArtifactUpdateEvent(
                     append=False,
@@ -153,63 +133,39 @@ class RoutingAgentExecutor(AgentExecutor):
                         parts=[Part(root=file_part)],
                     ),
                 ))
-
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
-                append=False,
-                context_id=context.context_id,
-                task_id=context.task_id,
-                last_chunk=True,
-                artifact=artifact)
-            )
-            # set and publish the final status
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-                state=TaskState(agent_response.status)),
-                final=True,
-                context_id=context.context_id,
-                task_id=context.task_id))
+            await _emit_artifact(event_queue, context, artifact)
+            await _emit_status(event_queue, context, final_state, final=True)
         except RoutingFailed as e:
             logger.error(f"Routing failed for context {context.context_id}: {e.message}")
-            error_artifact = new_text_artifact(
-                name='routing_error',
-                description='Error message for routing failure.',
-                text=e.message
-            )
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
-                append=False,
-                context_id=context.context_id,
-                task_id=context.task_id,
-                last_chunk=True,
-                artifact=error_artifact
-            ))
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-                state=TaskState.failed),
-                final=True,
-                context_id=context.context_id,
-                task_id=context.task_id))
+            await _fail_task(event_queue, context, name='routing_error',
+                             description='Error message for routing failure.',
+                             text=e.message)
         except Exception as e:
             logger.error(f"Error executing agent task for context {context.context_id}: {e}", )
-            error_artifact = new_text_artifact(
-                name='current_result',
-                description='Unexpected error while executing the agent task.',
-                text=f"*{self.agent_config.agent.card.name}* failed to process the request: {e}",
-            )
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
-                append=False,
-                context_id=context.context_id,
-                task_id=context.task_id,
-                last_chunk=True,
-                artifact=error_artifact,
-            ))
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(
-                status=TaskStatus(state=TaskState.failed),
-                final=True,
-                context_id=context.context_id,
-                task_id=context.task_id))
+            await _fail_task(event_queue, context, name='current_result',
+                             description='Unexpected error while executing the agent task.',
+                             text=f"*{self.agent_config.agent.card.name}* failed to process the request: {e}")
+
+    async def _build_result(self, invocation: AgentInvocation[StringResponse],
+                            context: RequestContext,
+                            ) -> tuple[Artifact, TaskState, list[tuple[str, FilePart]]]:
+        """Build the terminal artifact and state; on ``rejected``, reroute and report ``completed``."""
+        agent_response = invocation.structured
+        if agent_response.status == TaskState.rejected:
+            artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
+            return artifact, TaskState.completed, []
+        logger.info(f"Request with id {context.context_id} was successfully processed by agent.")
+        file_parts = extract_file_parts(invocation.messages)
+        artifact = new_text_artifact(
+            name='current_result',
+            description='Result of request to agent.',
+            text=f"*{self.agent_config.agent.card.name}*: {agent_response.response}"
+        )
+        return artifact, TaskState(agent_response.status), file_parts
 
     async def reinitialize_agent_with_tools(self) -> None:
         mcp_server_raw = await self.mcp_registry.get_mcp_tool_for_agent(self.agent_config.agent.card.name)
         if not mcp_server_raw:
-            # no mcp tool found no need to reinitialize Agent
             return
 
         logger.info(f"Agent {self.agent_config.agent.card.name} has access to the following tools: {mcp_server_raw}")
@@ -260,67 +216,20 @@ class RoutingExecutor(AgentExecutor):
             raise ValueError("Context ID and Task ID must be provided.")
 
         try:
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(state=TaskState.working),
-                                                                  final=False,
-                                                                  context_id=context.context_id,
-                                                                  task_id=context.task_id))
-
+            await _emit_status(event_queue, context, TaskState.working, final=False)
             artifact = await _route_request_to_matching_agent(self.routing_agent, self.agent_registry, context)
-
-            # publish actual result
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
-                append=False,
-                context_id=context.context_id,
-                task_id=context.task_id,
-                last_chunk=True,
-                artifact=artifact
-            ))
-            # set and publish the final status
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-                state=TaskState.completed),
-                final=True,
-                context_id=context.context_id,
-                task_id=context.task_id))
+            await _emit_artifact(event_queue, context, artifact)
+            await _emit_status(event_queue, context, TaskState.completed, final=True)
         except RoutingFailed as e:
             logger.error(f"Routing failed for context {context.context_id}: {e.message}")
-            artifact = new_text_artifact(
-                name='routing_error',
-                description='Error message for routing failure.',
-                text=e.message
-            )
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
-                append=False,
-                context_id=context.context_id,
-                task_id=context.task_id,
-                last_chunk=True,
-                artifact=artifact))
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-                state=TaskState.failed),
-                final=True,
-                context_id=context.context_id,
-                task_id=context.task_id
-            ))
-
+            await _fail_task(event_queue, context, name='routing_error',
+                             description='Error message for routing failure.',
+                             text=e.message)
         except Exception as e:
             logger.error(f"Error executing agent task for context {context.context_id}: {e}")
-            error_artifact = new_text_artifact(
-                name='routing_error',
-                description='Unexpected error while executing the routing task.',
-                text=f"Routing failed: {e}",
-            )
-            await event_queue.enqueue_event(TaskArtifactUpdateEvent(
-                append=False,
-                context_id=context.context_id,
-                task_id=context.task_id,
-                last_chunk=True,
-                artifact=error_artifact,
-            ))
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(status=TaskStatus(
-                state=TaskState.failed),
-                final=True,
-                context_id=context.context_id,
-                task_id=context.task_id
-            ))
+            await _fail_task(event_queue, context, name='routing_error',
+                             description='Unexpected error while executing the routing task.',
+                             text=f"Routing failed: {e}")
 
 
 async def _route_request_to_matching_agent(routing_agent: RoutingAgent,
@@ -341,3 +250,47 @@ async def _route_request_to_matching_agent(routing_agent: RoutingAgent,
     artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
                                  text=json.dumps(agent_card))
     return artifact
+
+
+async def _emit_status(event_queue: EventQueue,
+                       context: RequestContext,
+                       state: TaskState,
+                       *,
+                       final: bool) -> None:
+    """Publish a ``TaskStatusUpdateEvent`` for the current task."""
+    assert context.context_id is not None and context.task_id is not None
+    await event_queue.enqueue_event(TaskStatusUpdateEvent(
+        status=TaskStatus(state=state),
+        final=final,
+        context_id=context.context_id,
+        task_id=context.task_id,
+    ))
+
+
+async def _emit_artifact(event_queue: EventQueue,
+                         context: RequestContext,
+                         artifact: Artifact) -> None:
+    """Publish a single, terminal ``TaskArtifactUpdateEvent``."""
+    assert context.context_id is not None and context.task_id is not None
+    await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+        append=False,
+        context_id=context.context_id,
+        task_id=context.task_id,
+        last_chunk=True,
+        artifact=artifact,
+    ))
+
+
+async def _fail_task(event_queue: EventQueue,
+                     context: RequestContext,
+                     *,
+                     name: str,
+                     description: str,
+                     text: str) -> None:
+    """Emit an error artifact followed by a final ``failed`` status."""
+    await _emit_artifact(event_queue, context, new_text_artifact(
+        name=name,
+        description=description,
+        text=text,
+    ))
+    await _emit_status(event_queue, context, TaskState.failed, final=True)
