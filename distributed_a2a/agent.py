@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
 from a2a.types import TaskState
 from langchain.agents import create_agent
@@ -39,13 +39,10 @@ class StringResponse(AgentResponse):
 
 
 class AgentInvocation[ResponseT: AgentResponse](BaseModel):
-    """Result of invoking a :class:`StatusAgent`.
+    """Structured response plus the raw LangGraph message list.
 
-    Exposes both the structured response (LLM-visible content the agent decided
-    to return) and the raw message list produced by the underlying LangGraph
-    agent, so callers can mine ``ToolMessage.artifact`` for out-of-band binary
-    payloads (e.g. files returned by MCP tools) without those bytes ever passing
-    through the LLM context.
+    ``messages`` lets callers extract ``ToolMessage.artifact`` payloads (e.g.
+    binary files from MCP tools) without routing them through the LLM context.
     """
 
     structured: ResponseT
@@ -54,21 +51,15 @@ class AgentInvocation[ResponseT: AgentResponse](BaseModel):
 
 
 class StatusAgent[ResponseT: AgentResponse]:
+    RESPONSE_FORMAT: ClassVar[type[AgentResponse]]
 
     def __init__(self,
                  llm_config: LLMConfig,
                  name: str,
                  system_prompt: str,
                  api_key: str,
-                 is_routing: bool,
                  tools: list[BaseTool],
                  checkpointer: BaseCheckpointSaver[Any] | None = None):
-
-        response_format: type[AgentResponse]
-        if is_routing:
-            response_format = RoutingResponse
-        else:
-            response_format = StringResponse
 
         saver = checkpointer
         if saver is None:
@@ -86,7 +77,7 @@ class StatusAgent[ResponseT: AgentResponse]:
             tools=tools,
             checkpointer=saver,
             system_prompt=system_prompt,
-            response_format=response_format,
+            response_format=self.RESPONSE_FORMAT,
             name=name
         )
 
@@ -105,3 +96,11 @@ class StatusAgent[ResponseT: AgentResponse]:
             structured=cast(ResponseT, response['structured_response']),
             messages=list(response.get('messages', [])),
         )
+
+
+class RoutingAgent(StatusAgent[RoutingResponse]):
+    RESPONSE_FORMAT: ClassVar[type[RoutingResponse]] = RoutingResponse
+
+
+class SpecializedAgent(StatusAgent[StringResponse]):
+    RESPONSE_FORMAT: ClassVar[type[StringResponse]] = StringResponse

@@ -11,7 +11,8 @@ from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from .agent import RoutingResponse, StatusAgent, StringResponse
+from .agent import (RoutingAgent, RoutingResponse, SpecializedAgent,
+                    StringResponse)
 from .config import settings
 from .file_extractors import extract_file_parts
 from .mcp_interceptors import hide_binary_content_from_llm
@@ -82,21 +83,19 @@ class RoutingAgentExecutor(AgentExecutor):
         self.api_key = api_key
         self.specialized_checkpointer = specialized_checkpointer
         self.agent_registry = agent_registry
-        self.agent = StatusAgent[StringResponse](
+        self.agent = SpecializedAgent(
             llm_config=agent_config.agent.llm,
             system_prompt=GENERAL_SYSTEM_PROMPT + agent_config.agent.system_prompt,
             name=agent_config.agent.card.name,
             api_key=api_key,
-            is_routing=False,
             tools=[] if tools is None else tools,
             checkpointer=specialized_checkpointer
         )
-        self.routing_agent = StatusAgent[RoutingResponse](
+        self.routing_agent = RoutingAgent(
             llm_config=agent_config.agent.llm,
             system_prompt=ROUTING_SYSTEM_PROMPT,
             name="Router",
             api_key=api_key,
-            is_routing=True,
             tools=[agent_registry.as_tool()],
             checkpointer=routing_checkpointer
 
@@ -221,12 +220,11 @@ class RoutingAgentExecutor(AgentExecutor):
         )
         mcp_tools = await mcp_client.get_tools()
 
-        self.agent = StatusAgent[StringResponse](
+        self.agent = SpecializedAgent(
             llm_config=self.agent_config.agent.llm,
             system_prompt=GENERAL_SYSTEM_PROMPT + self.agent_config.agent.system_prompt,
             name=self.agent_config.agent.card.name,
             api_key=self.api_key,
-            is_routing=False,
             tools=mcp_tools,
             checkpointer=self.specialized_checkpointer,
         )
@@ -239,12 +237,11 @@ class RoutingExecutor(AgentExecutor):
         if api_key is None:
             raise ValueError("No API key found for LLM.")
         self.agent_registry = agent_registry
-        self.routing_agent = StatusAgent[RoutingResponse](
+        self.routing_agent = RoutingAgent(
             llm_config=router_config.router.llm,
             system_prompt=ROUTING_SYSTEM_PROMPT,
             name=router_config.router.card.name,
             api_key=api_key,
-            is_routing=True,
             tools=[agent_registry.as_tool()]
         )
 
@@ -319,7 +316,7 @@ class RoutingExecutor(AgentExecutor):
             ))
 
 
-async def _route_request_to_matching_agent(routing_agent: StatusAgent[RoutingResponse],
+async def _route_request_to_matching_agent(routing_agent: RoutingAgent,
                                            agent_registry: AgentRegistryLookupClient,
                                            context: RequestContext) -> Artifact:
     invocation = await routing_agent(message=context.get_user_input(),
