@@ -1,7 +1,8 @@
 import pytest
 from a2a.types import AgentCapabilities, AgentCard, TaskState
 
-from distributed_a2a.client import AgentReply, RoutingA2AClient
+from distributed_a2a.client import (A2ARemoteTaskError, AgentReply,
+                                    RoutingA2AClient)
 
 
 def build_card(name: str, url: str) -> AgentCard:
@@ -165,5 +166,5 @@ async def test_fails_when_router_returns_already_rejected_agent(monkeypatch: pyt
 
     monkeypatch.setattr("distributed_a2a.client.RemoteAgentConnection", FakeRemoteAgentConnection)
 
-    with pytest.raises(Exception, match="already rejected but was redirected to again"):
+    with pytest.raises(A2ARemoteTaskError, match="already rejected but was redirected to again"):
         await client.send_message("Hello", context_id="ctx-1")

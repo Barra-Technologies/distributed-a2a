@@ -59,6 +59,49 @@ class A2ATimeoutError(Exception):
         )
 
 
+class A2AProtocolError(Exception):
+    """Base class for protocol-level failures talking to a remote agent."""
+
+
+class A2AAuthRequiredError(A2AProtocolError):
+    """The remote agent reported that authentication is required."""
+
+    def __init__(self, target_url: str) -> None:
+        self.target_url = target_url
+        super().__init__(f"Remote agent at {target_url} requires authentication")
+
+
+class A2ARemoteTaskError(A2AProtocolError):
+    """The remote agent task ended in a ``failed`` state."""
+
+    def __init__(self, target_url: str, message: str) -> None:
+        self.target_url = target_url
+        self.message = message
+        super().__init__(message)
+
+
+class A2AEmptyResponseError(A2AProtocolError):
+    """The remote agent returned no task response at all."""
+
+    def __init__(self, target_url: str) -> None:
+        self.target_url = target_url
+        super().__init__(f"No task response received from agent at {target_url}")
+
+
+class A2AUnexpectedResponseError(A2AProtocolError):
+    """The remote response did not match any known artifact / state shape."""
+
+    def __init__(self, target_url: str, task_state: TaskState | None,
+                 artifact_names: list[str]) -> None:
+        self.target_url = target_url
+        self.task_state = task_state
+        self.artifact_names = artifact_names
+        super().__init__(
+            f"Wrong response format from agent at {target_url}: "
+            f"task state={task_state}, artifact_names={artifact_names}"
+        )
+
+
 class RemoteAgentConnection:
     """A class to hold the connections to the remote agents."""
 
@@ -90,7 +133,7 @@ class RemoteAgentConnection:
                 responses.append(response)
 
         if not responses:
-            raise Exception("Wrong response format: no task response received from agent")
+            raise A2AEmptyResponseError(self.agent_card.url)
         task_response, _ = responses[-1]
         return task_response
 
@@ -129,7 +172,7 @@ class RemoteAgentConnection:
 
         task_state = response.status.state
         if task_state == TaskState.auth_required:
-            raise Exception("A2ATaskAuthRequired")
+            raise A2AAuthRequiredError(self.agent_card.url)
 
         if task_state == TaskState.failed:
             error_msg = "Agent task failed"
@@ -139,7 +182,7 @@ class RemoteAgentConnection:
                     if root is not None and isinstance(root, TextPart):
                         error_msg = root.text
                         break
-            raise Exception(error_msg)
+            raise A2ARemoteTaskError(self.agent_card.url, error_msg)
 
         for artifact in response.artifacts or []:
             match artifact.name, artifact.parts:
@@ -179,7 +222,7 @@ class RemoteAgentConnection:
             return TaskState.rejected
 
         artifact_names = [getattr(a, 'name', type(a).__name__) for a in (response.artifacts or [])]
-        raise Exception(f"Wrong response format: task state={task_state}, artifact_names={artifact_names}")
+        raise A2AUnexpectedResponseError(self.agent_card.url, task_state, artifact_names)
 
 
 MAX_RECURSION_DEPTH = 10
@@ -217,7 +260,9 @@ class RoutingA2AClient:
                            depth: int = 0,
                            rejected_agents: list[str] | None = None) -> AgentReply:
         if depth > MAX_RECURSION_DEPTH:
-            raise Exception("Maximum recursion depth exceeded. This is likely due to an infinite loop in your agent.")
+            raise A2AProtocolError(
+                "Maximum recursion depth exceeded. This is likely due to an infinite loop in your agent."
+            )
 
         if rejected_agents is None:
             rejected_agents = []
@@ -228,36 +273,53 @@ class RoutingA2AClient:
         if self.current_card is None:
             raise ValueError("Failed to fetch current agent card.")
 
-        agent_connection = RemoteAgentConnection(
-            self.current_card, self.client,
-            max_polls=self.max_polls, poll_interval=self.poll_interval,
-        )
-        message_to_send = message
-        if rejected_agents:
-            excluded_names = ", ".join(sorted(set(rejected_agents)))
-            rejection_msg = f"Please exclude the following agents from routing: {excluded_names}"
-            if rejection_msg not in message:
-                message_to_send = f"{message}\n\n{rejection_msg}"
+        current_depth = depth
+        while True:
+            if current_depth > MAX_RECURSION_DEPTH:
+                raise A2AProtocolError(
+                    "Maximum recursion depth exceeded. This is likely due to an infinite loop in your agent."
+                )
 
-        agent_response: AgentReply | AgentCard | TaskState = await agent_connection.send_message(message_to_send, context_id)
-        if isinstance(agent_response, AgentCard):
-            if agent_response.url == self.current_card.url:
-                raise Exception("Agent redirected to itself.")
-            if agent_response.name in rejected_agents:
-                raise Exception(f"Agent {agent_response.name} was already rejected but was redirected to again.")
-            self.current_card = agent_response
-            return await self.send_message(message, context_id, depth + 1, rejected_agents)
+            agent_connection = RemoteAgentConnection(
+                self.current_card, self.client,
+                max_polls=self.max_polls, poll_interval=self.poll_interval,
+            )
+            message_to_send = message
+            if rejected_agents:
+                excluded_names = ", ".join(sorted(set(rejected_agents)))
+                rejection_msg = f"Please exclude the following agents from routing: {excluded_names}"
+                if rejection_msg not in message:
+                    message_to_send = f"{message}\n\n{rejection_msg}"
 
-        if isinstance(agent_response, TaskState):
-            if agent_response == TaskState.rejected:
-                if self.current_card.name in rejected_agents:
-                    raise Exception(
-                        f"Agent {self.current_card.name} rejected the request again after being already in the rejected list."
+            agent_response: AgentReply | AgentCard | TaskState = await agent_connection.send_message(message_to_send, context_id)
+
+            if isinstance(agent_response, AgentCard):
+                if agent_response.url == self.current_card.url:
+                    raise A2ARemoteTaskError(self.current_card.url, "Agent redirected to itself.")
+                if agent_response.name in rejected_agents:
+                    raise A2ARemoteTaskError(
+                        agent_response.url,
+                        f"Agent {agent_response.name} was already rejected but was redirected to again.",
                     )
-                rejected_agents.append(self.current_card.name)
-                await self.fetch_initial_card()
-                return await self.send_message(message, context_id, depth + 1, rejected_agents)
-            else:
-                raise Exception(f"Unexpected task state returned by agent: {agent_response}")
+                self.current_card = agent_response
+                current_depth += 1
+                continue
 
-        return agent_response
+            if isinstance(agent_response, TaskState):
+                if agent_response == TaskState.rejected:
+                    if self.current_card.name in rejected_agents:
+                        raise A2ARemoteTaskError(
+                            self.current_card.url,
+                            f"Agent {self.current_card.name} rejected the request again after being already in the rejected list.",
+                        )
+                    rejected_agents.append(self.current_card.name)
+                    await self.fetch_initial_card()
+                    if self.current_card is None:
+                        raise ValueError("Failed to refetch initial agent card after rejection.")
+                    current_depth += 1
+                    continue
+                raise A2AUnexpectedResponseError(
+                    self.current_card.url, agent_response, artifact_names=[]
+                )
+
+            return agent_response

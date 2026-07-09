@@ -1,4 +1,7 @@
-from .client import A2ATimeoutError, AgentReply, FileRef, RoutingA2AClient
+from .client import (A2AAuthRequiredError, A2AEmptyResponseError,
+                     A2AProtocolError, A2ARemoteTaskError, A2ATimeoutError,
+                     A2AUnexpectedResponseError, AgentReply, FileRef,
+                     RoutingA2AClient)
 from .mcp_interceptors import (NON_TEXT_CONTENT_KEY,
                                hide_binary_content_from_llm)
 from .model import (AgentConfig, AgentItem, CardConfig, LLMConfig,
@@ -18,6 +21,11 @@ __all__ = [
     "A2ATimeoutError",
     "AgentReply",
     "FileRef",
+    "A2AProtocolError",
+    "A2AAuthRequiredError",
+    "A2ARemoteTaskError",
+    "A2AEmptyResponseError",
+    "A2AUnexpectedResponseError",
     "load_registry",
     "AgentConfig",
     "SkillConfig",
