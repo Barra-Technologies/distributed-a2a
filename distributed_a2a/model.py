@@ -1,9 +1,10 @@
-import os
 from typing import Any, List
 
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, SecretStr
+
+FILE_PROMPT_SCHEME = "file://"
 
 
 class SkillConfig(BaseModel):
@@ -48,7 +49,13 @@ class AgentItem(BaseModel):
     registry: RegistryConfig | None = Field(description="The registry configuration node", default=None)
     card: CardConfig = Field(description="The agent card configuration node")
     llm: LLMConfig = Field(description="The LLM configuration node")
-    system_prompt: str = Field(description="The system prompt to use for the LLM or a path to a file containing the system prompt")
+    system_prompt: str = Field(
+        description=(
+            "The system prompt to use for the LLM. To load it from a file "
+            "instead, prefix the path with the explicit `file://` scheme "
+            "(e.g. `file:///etc/prompts/agent.md` or `file://./prompt.md`)."
+        )
+    )
     advertise_routing_skill: bool = Field(
         default=False,
         description=(
@@ -61,9 +68,10 @@ class AgentItem(BaseModel):
     )
 
     def __init__(self, /, **data: Any) -> None:
-        prompt_or_path = data['system_prompt']
-        if os.path.exists(prompt_or_path):
-            with open(prompt_or_path, "r", encoding="utf-8") as f:
+        prompt = data.get('system_prompt')
+        if isinstance(prompt, str) and prompt.startswith(FILE_PROMPT_SCHEME):
+            path = prompt[len(FILE_PROMPT_SCHEME):]
+            with open(path, "r", encoding="utf-8") as f:
                 data['system_prompt'] = f.read()
 
         super().__init__(**data)
