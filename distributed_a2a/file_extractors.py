@@ -57,7 +57,6 @@ def _extract_from_mcp_blocks(blocks: list[Any]) -> list[tuple[str, FilePart]]:
 def _mcp_block_to_file_part(
     block: Any, counters: dict[str, int],
 ) -> tuple[str, FilePart] | None:
-    # Normalise both shapes into (type_tag, extractor-friendly view).
     if isinstance(block, EmbeddedResource) and isinstance(
         block.resource, BlobResourceContents,
     ):
