@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Any, cast
 
 from .model import McpServer
@@ -9,12 +10,15 @@ MCP_SERVER_COLUMN = "server"
 ALLOWED_AGENTS_FIELD = "allowed-agents"
 
 
-def _dynamo_resource(region_name: str = "eu-central-1") -> Any:
+def _dynamo_resource(region_name: str | None = None) -> Any:
     """Lazily import ``boto3`` so consumers that never use DynamoDB don't pay
     the import cost (boto3 pulls in botocore which is heavy).
     """
     import boto3  # noqa: WPS433 - intentional local import
-    return boto3.resource("dynamodb", region_name=region_name)
+    resolved = region_name or os.getenv("AWS_DEFAULT_REGION")
+    if resolved:
+        return boto3.resource("dynamodb", region_name=resolved)
+    return boto3.resource("dynamodb")
 
 
 class DynamoDbAgentRegistryLookup(AgentRegistryLookup):
