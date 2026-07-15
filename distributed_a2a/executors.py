@@ -117,7 +117,9 @@ class RoutingAgentExecutor(AgentExecutor):
 
         try:
             await _emit_status(event_queue, context, TaskState.working, final=False)
-            await self.reinitialize_agent_with_tools()
+            mcp_client = await self._build_mcp_client()
+            if mcp_client is not None:
+                self._update_agent_with_tools(await mcp_client.get_tools())
             invocation = await self.agent(message=context.get_user_input(),
                                           context_id=context.context_id)
             artifact, final_state, file_parts, delivered_sources = await self._build_result(invocation, context)
@@ -167,11 +169,10 @@ class RoutingAgentExecutor(AgentExecutor):
         )
         return artifact, TaskState(agent_response.status), file_parts, delivered_sources
 
-    async def reinitialize_agent_with_tools(self) -> None:
+    async def _build_mcp_client(self) -> MultiServerMCPClient | None:
         mcp_server_raw = await self.mcp_registry.get_mcp_tool_for_agent(self.agent_config.agent.card.name)
         if not mcp_server_raw:
-            return
-
+            return None
         logger.info(f"Agent {self.agent_config.agent.card.name} has access to the following tools: {mcp_server_raw}")
         mcp_servers: dict[str, Any] = {
             tool["name"]: {
@@ -181,12 +182,12 @@ class RoutingAgentExecutor(AgentExecutor):
             }
             for tool in mcp_server_raw
         }
-        mcp_client = MultiServerMCPClient(
+        return MultiServerMCPClient(
             connections=mcp_servers,
             tool_interceptors=[hide_binary_content_from_llm],
         )
-        mcp_tools = await mcp_client.get_tools()
 
+    def _update_agent_with_tools(self, mcp_tools: list[Any]) -> None:
         self.agent = SpecializedAgent(
             llm_config=self.agent_config.agent.llm,
             system_prompt=GENERAL_SYSTEM_PROMPT + self.agent_config.agent.system_prompt,
