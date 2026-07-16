@@ -3,6 +3,8 @@ from typing import Any, ClassVar, Literal, cast
 
 from a2a.types import TaskState
 from langchain.agents import create_agent
+from langchain.agents.middleware import (ClearToolUsesEdit,
+                                         ContextEditingMiddleware)
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -10,6 +12,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel, Field
 
+from .config import settings
 from .model import LLMConfig, get_model
 
 
@@ -72,12 +75,22 @@ class StatusAgent[ResponseT: AgentResponse]:
                 logging.warning(f"Failed to initialize MemorySaver: {e}. Falling back to no checkpointer.")
                 saver = None
 
+        middleware = [
+            ContextEditingMiddleware(edits=[
+                ClearToolUsesEdit(
+                    trigger=settings.context_edit_trigger_tokens,
+                    keep=settings.context_edit_keep_tool_uses,
+                ),
+            ]),
+        ]
+
         self.agent = create_agent(
             get_model(api_key=api_key,
                       model=llm_config.model,
                       base_url=llm_config.base_url,
                       reasoning_effort=llm_config.reasoning_effort),
             tools=tools,
+            middleware=middleware,
             checkpointer=saver,
             system_prompt=system_prompt,
             response_format=self.RESPONSE_FORMAT,

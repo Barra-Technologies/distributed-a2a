@@ -26,6 +26,25 @@ class Settings:
     def get_env_var(self, name: str, default: str | None = None) -> str | None:
         return os.getenv(name, default)
 
+    @property
+    def context_edit_trigger_tokens(self) -> int:
+        """Token threshold that triggers ``ClearToolUsesEdit``.
+
+        Set well below the ``langchain`` default of 100_000 so that older
+        tool outputs are dropped from the message history before the
+        LangGraph checkpoint reaches DynamoDB's 400 KB item-size limit.
+        Override with ``CONTEXT_EDIT_TRIGGER_TOKENS``.
+        """
+        return int(os.getenv("CONTEXT_EDIT_TRIGGER_TOKENS", "30000"))
+
+    @property
+    def context_edit_keep_tool_uses(self) -> int:
+        """How many recent tool results ``ClearToolUsesEdit`` preserves.
+
+        Override with ``CONTEXT_EDIT_KEEP_TOOL_USES``.
+        """
+        return int(os.getenv("CONTEXT_EDIT_KEEP_TOOL_USES", "3"))
+
 
 def _parse_json_env(name: str) -> Dict[str, str]:
     raw = os.getenv(name)
