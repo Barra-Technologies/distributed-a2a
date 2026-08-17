@@ -7,3 +7,7 @@ distributed-a2a.iml
 distributed_a2a/build
 distributed_a2a/distributed_a2a.egg-info
 distributed_a2a/dist
+
+
+*.egg-info/*
+
