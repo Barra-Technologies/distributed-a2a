@@ -1,8 +1,9 @@
-"""In-memory storage implementation for agent and MCP registries."""
 import json
-from typing import Any
+import time
+from typing import Any, Callable
+
 from .model import McpServer
-from .storage import McpRegistryLookup, AgentRegistryLookup
+from .storage import AgentRegistryLookup, McpRegistryLookup
 
 
 class InMemoryMcpRegistry(McpRegistryLookup):
@@ -55,28 +56,44 @@ class InMemoryMcpRegistry(McpRegistryLookup):
 
 
 class InMemoryAgentRegistry(AgentRegistryLookup):
-    """In-memory implementation of the agent registry."""
-
-    def __init__(self) -> None:
+    def __init__(self,
+                 enforce_ttl: bool = False,
+                 time_func: Callable[[], float] = time.time) -> None:
         self._agents: dict[str, dict[str, Any]] = {}
+        self._enforce_ttl = enforce_ttl
+        self._time_func = time_func
+
+    def _is_expired(self, entry: dict[str, Any]) -> bool:
+        if not self._enforce_ttl:
+            return False
+        expire_at = entry.get("expire_at")
+        if not isinstance(expire_at, (int, float)):
+            return False
+        return float(expire_at) < self._time_func()
 
     def get_agent_cards(self) -> list[dict[str, Any]]:
-        """Retrieves all registered agent cards."""
-        return [json.loads(agent["card"]) for agent in self._agents.values()]
+        """Retrieves all registered (non-expired) agent cards."""
+        return [
+            json.loads(agent["card"])
+            for agent in self._agents.values()
+            if not self._is_expired(agent)
+        ]
 
     def get_agent_card(self, name: str) -> str | None:
-        """Retrieves a specific agent card by name."""
+        """Retrieves a specific agent card by name, if not expired."""
         agent_data = self._agents.get(name)
+        if agent_data is None or self._is_expired(agent_data):
+            return None
         return agent_data["card"] if agent_data else None
 
-    def put_agent_card(self, name: str, card: str, expire_at: str) -> None:
+    def put_agent_card(self, name: str, card: str, expire_at: int) -> None:
         """Registers or updates an agent card."""
         self._agents[name] = {
             "card": card,
             "expire_at": expire_at
         }
 
-    def update_agent_expiry(self, name: str, expire_at: str) -> None:
+    def update_agent_expiry(self, name: str, expire_at: int) -> None:
         """Updates the expiration timestamp for an agent registration."""
         if name in self._agents:
             self._agents[name]["expire_at"] = expire_at

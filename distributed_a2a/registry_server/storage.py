@@ -1,7 +1,9 @@
 """Storage abstractions for agent and MCP registries."""
 from abc import ABC, abstractmethod
 from typing import Any
+
 from .model import McpServer
+
 
 class AgentRegistryLookup(ABC):
     @abstractmethod
@@ -26,23 +28,23 @@ class AgentRegistryLookup(ABC):
         pass
 
     @abstractmethod
-    def put_agent_card(self, name: str, card: str, expire_at: str) -> None:
+    def put_agent_card(self, name: str, card: str, expire_at: int) -> None:
         """Registers or updates an agent card.
 
         Args:
             name: The name of the agent.
             card: The agent card (JSON string).
-            expire_at: Expiration timestamp for the registration.
+            expire_at: Unix-epoch expiration timestamp (seconds) for the registration.
         """
         pass
 
     @abstractmethod
-    def update_agent_expiry(self, name: str, expire_at: str) -> None:
+    def update_agent_expiry(self, name: str, expire_at: int) -> None:
         """Updates the expiration timestamp for an agent registration.
 
         Args:
             name: The name of the agent.
-            expire_at: The new expiration timestamp.
+            expire_at: The new Unix-epoch expiration timestamp (seconds).
         """
         pass
 

@@ -1,11 +1,12 @@
 """Bootstrap logic for the registry server FastAPI application."""
 import json
 from typing import Any, cast
-from fastapi import FastAPI, APIRouter, HTTPException
 
-from .storage import AgentRegistryLookup, McpRegistryLookup
-from .dynamo_db import DynamoDbAgentRegistryLookup, DynamoDbMcpRegistryLookup
+from fastapi import APIRouter, FastAPI, HTTPException
+
 from .model import McpServer
+from .storage import AgentRegistryLookup, McpRegistryLookup
+
 
 def load_registry(agent_registry: AgentRegistryLookup, mcp_registry: McpRegistryLookup) -> FastAPI:
     """Bootstraps the registry server FastAPI application.
@@ -23,15 +24,14 @@ def load_registry(agent_registry: AgentRegistryLookup, mcp_registry: McpRegistry
     agent_router = APIRouter()
 
     @agent_router.put("/agent-card/{name}")
-    def put_agent_card(name: str, agent_card: dict[str, Any], expire_at: str) -> None:
+    def put_agent_card(name: str, agent_card: dict[str, Any], expire_at: int) -> None:
         """Endpoint to register or update an agent card."""
         agent_registry.put_agent_card(name=name, card=json.dumps(agent_card), expire_at=expire_at)
 
     @agent_router.get("/agent-card/{name}")
     def get_agent_card(name: str) -> dict[str, Any]:
-        card_str = agent_registry.get_agent_card(name=name)
         """Endpoint to retrieve a specific agent card."""
-
+        card_str = agent_registry.get_agent_card(name=name)
         if card_str:
             return cast(dict[str, Any], json.loads(card_str))
         raise HTTPException(status_code=404, detail="Agent card not found")
@@ -42,7 +42,7 @@ def load_registry(agent_registry: AgentRegistryLookup, mcp_registry: McpRegistry
         return agent_registry.get_agent_cards()
 
     @agent_router.patch("/agent-card/{name}/heartbeat")
-    def patch_agent_heartbeat(name: str, expire_at: str) -> None:
+    def patch_agent_heartbeat(name: str, expire_at: int) -> None:
         """Endpoint to update the heartbeat/expiration for an agent."""
         agent_registry.update_agent_expiry(name=name, expire_at=expire_at)
 

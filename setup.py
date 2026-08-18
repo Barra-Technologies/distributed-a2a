@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -8,7 +8,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="distributed_a2a",
-    version="0.1.4",
+    version="0.2.7",
     author="Fabian Bell",
     author_email="fabian.bell@barrabytes.com",
     description="A library for building A2A agents with routing capabilities",
@@ -22,10 +22,8 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.14",
     ],
-    python_requires=">=3.10",
+    python_requires=">=3.14",
     install_requires=requirements,
 )

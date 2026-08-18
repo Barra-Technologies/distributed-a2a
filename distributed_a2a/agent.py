@@ -1,18 +1,28 @@
 import logging
-from typing import Any, Literal, Optional
+from typing import Any, ClassVar, Literal, cast
 
 from a2a.types import TaskState
 from langchain.agents import create_agent
+from langchain.agents.middleware import (ClearToolUsesEdit,
+                                         ContextEditingMiddleware)
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel, Field
-from .model import get_model, LLMConfig
+
+from .config import settings
+from .model import LLMConfig, get_model
 
 
 class AgentResponse(BaseModel):
-    status: Literal[TaskState.rejected, TaskState.completed, TaskState.failed] = Field(
+    status: Literal[
+        TaskState.rejected,
+        TaskState.completed,
+        TaskState.failed,
+        TaskState.input_required,
+    ] = Field(
         description=(
             f'You should select status as {TaskState.rejected} for requests that fall outside your area of expertise.'
             f'You should select status as {TaskState.completed} if the request is fully addressed and no further input is needed. '
@@ -23,31 +33,56 @@ class AgentResponse(BaseModel):
 
 
 class RoutingResponse(AgentResponse):
-    agent_name: Optional[str] = Field(default=None, description="The agent_name of the agent to be routed to")
-    message: Optional[str] = Field(default=None, description="The answer, answered by the routing agent")
+    agent_name: str | None = Field(default=None, description="The agent_name of the agent to be routed to")
+    message: str | None = Field(default=None, description="The answer, answered by the routing agent")
 
 
 class StringResponse(AgentResponse):
     response: str = Field(description="The main response to be returned to the user")
 
 
-class StatusAgent[ResponseT: AgentResponse]:
+class AgentInvocation[ResponseT: AgentResponse](BaseModel):
+    """Structured response plus the raw message list.
 
-    def __init__(self, llm_config: LLMConfig, name: str, system_prompt: str, api_key: str, is_routing: bool,
-                 tools: list[BaseTool], checkpointer: Optional[BaseCheckpointSaver[Any]] = None):
-        response_format: type[AgentResponse]
-        if is_routing:
-            response_format = RoutingResponse
-        else:
-            response_format = StringResponse
+    ``messages`` lets callers extract ``ToolMessage.artifact`` payloads (e.g.
+    binary files from MCP tools) without routing them through the LLM context.
+    Artifacts already delivered on a previous turn are flagged in-place on
+    the ``ToolMessage.artifact`` dict (see `.file_extractors`) so they
+    are skipped by downstream extraction and are not re-sent to the client.
+    """
+
+    structured: ResponseT
+    messages: list[BaseMessage]
+    model_config = {"arbitrary_types_allowed": True}
+
+
+class StatusAgent[ResponseT: AgentResponse]:
+    RESPONSE_FORMAT: ClassVar[type[AgentResponse]]
+
+    def __init__(self,
+                 llm_config: LLMConfig,
+                 name: str,
+                 system_prompt: str,
+                 api_key: str,
+                 tools: list[BaseTool],
+                 checkpointer: BaseCheckpointSaver[Any] | None = None):
 
         saver = checkpointer
         if saver is None:
             try:
                 saver = MemorySaver()
             except Exception as e:
-                logging.warning(f"Failed to initialize DynamoDBSaver: {e}. Falling back to no checkpointer.")
+                logging.warning(f"Failed to initialize MemorySaver: {e}. Falling back to no checkpointer.")
                 saver = None
+
+        middleware = [
+            ContextEditingMiddleware(edits=[
+                ClearToolUsesEdit(
+                    trigger=settings.context_edit_trigger_tokens,
+                    keep=settings.context_edit_keep_tool_uses,
+                ),
+            ]),
+        ]
 
         self.agent = create_agent(
             get_model(api_key=api_key,
@@ -55,21 +90,54 @@ class StatusAgent[ResponseT: AgentResponse]:
                       base_url=llm_config.base_url,
                       reasoning_effort=llm_config.reasoning_effort),
             tools=tools,
+            middleware=middleware,
             checkpointer=saver,
             system_prompt=system_prompt,
-            response_format=response_format,
+            response_format=self.RESPONSE_FORMAT,
             name=name
         )
 
-    async def __call__(self, message: str, context_id: Optional[str] = None) -> ResponseT:
-        config: RunnableConfig = RunnableConfig(configurable={'thread_id': context_id})
-        response = await self.agent.ainvoke(LangGraphMessage(message), config) # type: ignore[arg-type]
+    async def __call__(self,
+                       message: str,
+                       context_id: str | None = None) -> AgentInvocation[ResponseT]:
+        config: RunnableConfig = RunnableConfig(
+            configurable={'thread_id': context_id}
+        )
+        response = await self.agent.ainvoke(
+            {"messages": [HumanMessage(content=message)]},
+            config
+        )
         logging.info("agent response: %s", response)
-        return response['structured_response']  # type: ignore
+        return AgentInvocation[ResponseT](
+            structured=cast(ResponseT, response['structured_response']),
+            messages=list(response.get('messages', [])),
+        )
+
+    async def persist_delivered_messages(self,
+                                         context_id: str | None,
+                                         messages: list[BaseMessage]) -> None:
+        """Write ``messages`` back into the checkpoint so the delivered
+        flag set by :func:`.file_extractors.extract_file_parts` survives to
+        the next turn and prevents artifact re-delivery.
+        """
+        if not messages or context_id is None:
+            return
+        config: RunnableConfig = RunnableConfig(
+            configurable={'thread_id': context_id}
+        )
+        try:
+            await self.agent.aupdate_state(config, {"messages": messages})
+        except Exception:
+            logging.warning(
+                "Failed to persist delivered-artifact flag for context %s",
+                context_id,
+                exc_info=True,
+            )
 
 
-class LangGraphMessage(BaseModel):
-    messages: list[tuple[Literal['user'], str]]
+class RoutingAgent(StatusAgent[RoutingResponse]):
+    RESPONSE_FORMAT: ClassVar[type[RoutingResponse]] = RoutingResponse
 
-    def __init__(self, messages: str):
-        super().__init__(messages=[("user", messages)])
+
+class SpecializedAgent(StatusAgent[StringResponse]):
+    RESPONSE_FORMAT: ClassVar[type[StringResponse]] = StringResponse

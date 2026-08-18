@@ -29,7 +29,9 @@ bump-patch:
 	toml set project.version $$NEW_VERSION --toml-path pyproject.toml
 
 upload:
-	python -m build
+	rm -rf dist build *.egg-info
+	python3 -m build
+	python3 -m twine check dist/*
 	python3 -m twine upload dist/*
 
 mypy:
