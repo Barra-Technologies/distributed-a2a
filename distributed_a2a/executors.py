@@ -245,12 +245,32 @@ async def _route_request_to_matching_agent(routing_agent: RoutingAgent,
     routing_agent_response: RoutingResponse = invocation.structured
     agent_name: str | None = routing_agent_response.agent_name
     logger.info(f"routing response received: {routing_agent_response}")
+    if routing_agent_response.status == TaskState.failed:
+        message = routing_agent_response.message
+        raise RoutingFailed(
+            message=message if message else str(routing_agent_response)
+        )
     if agent_name is None:
-        raise RoutingFailed(message=routing_agent_response.message if routing_agent_response.message else str(routing_agent_response))
-    logger.info(f"Request with id {context.context_id} got rejected and will be rerouted to a '{agent_name}'.")
+        if routing_agent_response.message:
+            logger.info(
+                "No matching target agent found for context %s; returning router fallback message.",
+                context.context_id,
+            )
+            return new_text_artifact(
+                name='current_result',
+                description='Fallback response from routing agent.',
+                text=routing_agent_response.message,
+            )
+        raise RoutingFailed(message=str(routing_agent_response))
+    logger.info(
+        "Request with id %s got rejected and will be rerouted to a '%s'.",
+        context.context_id,
+        agent_name,
+    )
     agent_card: dict[str, Any] | None = await agent_registry.get_agent_card(agent_name)
     if agent_card is None:
-        raise RoutingFailed(message=routing_agent_response.message if routing_agent_response.message else str(routing_agent_response))
+        message = routing_agent_response.message
+        raise RoutingFailed(message=message if message else str(routing_agent_response))
     logger.info(f"Routing agent response for request with id {context.context_id}: {agent_card}")
     artifact = new_text_artifact(name='target_agent', description='New target agent for request.',
                                  text=json.dumps(agent_card))

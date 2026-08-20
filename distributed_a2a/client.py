@@ -142,6 +142,35 @@ class RemoteAgentConnection:
         response: Task = await self.agent_client.get_task(query_params)
         return response
 
+    @staticmethod
+    def _extract_failure_message(response: Task) -> str:
+        """Best-effort human-readable error text for a ``failed`` task.
+
+        ``_fail_task`` on the executor side (see ``distributed_a2a.
+        executors``) publishes the actual error text as a text artifact
+        (``current_result`` or ``routing_error``) and only sets the bare
+        ``failed`` state on ``TaskStatus`` -- it does not populate
+        ``status.message``. So we have to check both: ``status.message``
+        first (in case a future/older executor does set it), then fall back
+        to scanning the artifacts, and only then give up with a generic
+        message.
+        """
+        if response.status.message:
+            for part in response.status.message.parts or []:
+                root = getattr(part, 'root', None)
+                if root is not None and isinstance(root, TextPart) and root.text:
+                    return root.text
+
+        for artifact in response.artifacts or []:
+            if artifact.name not in ('current_result', 'routing_error'):
+                continue
+            for part in artifact.parts or []:
+                root = getattr(part, 'root', None)
+                if root is not None and isinstance(root, TextPart) and root.text:
+                    return root.text
+
+        return "Agent task failed"
+
     async def send_message(self,
                            message_to_send: str,
                            context_id: str,
@@ -175,14 +204,9 @@ class RemoteAgentConnection:
             raise A2AAuthRequiredError(self.agent_card.url)
 
         if task_state == TaskState.failed:
-            error_msg = "Agent task failed"
-            if response.status.message:
-                for part in response.status.message.parts or []:
-                    root = getattr(part, 'root', None)
-                    if root is not None and isinstance(root, TextPart):
-                        error_msg = root.text
-                        break
-            raise A2ARemoteTaskError(self.agent_card.url, error_msg)
+            raise A2ARemoteTaskError(
+                self.agent_card.url, self._extract_failure_message(response)
+            )
 
         for artifact in response.artifacts or []:
             match artifact.name, artifact.parts:
