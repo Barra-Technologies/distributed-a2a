@@ -36,6 +36,19 @@ class _StubRegistry:
         return self._agent_card
 
 
+def _routing_agent(response: RoutingResponse) -> Any:
+    """Typed as ``Any`` so mypy doesn't check it against ``RoutingAgent``.
+
+    Mirrors the ``_make_handler(...) -> Any`` pattern in
+    ``test_mcp_interceptors.py`` rather than casting at each call site.
+    """
+    return _StubRoutingAgent(response)
+
+
+def _registry(agent_card: dict[str, Any] | None) -> Any:
+    return _StubRegistry(agent_card)
+
+
 def _ctx() -> RequestContext:
     msg = Message(
         message_id="m-1",
@@ -57,10 +70,8 @@ async def test_route_returns_target_agent_artifact() -> None:
         status=TaskState.completed,
         agent_name="weather-agent",
     )
-    routing_agent = _StubRoutingAgent(response)
-    registry = _StubRegistry(
-        {"name": "weather-agent", "url": "http://weather"}
-    )
+    routing_agent = _routing_agent(response)
+    registry = _registry({"name": "weather-agent", "url": "http://weather"})
 
     artifact = await _route_request_to_matching_agent(
         routing_agent,
@@ -86,8 +97,8 @@ async def test_route_returns_fallback_message_when_no_agent_name() -> None:
         agent_name=None,
         message=fallback,
     )
-    routing_agent = _StubRoutingAgent(response)
-    registry = _StubRegistry(None)
+    routing_agent = _routing_agent(response)
+    registry = _registry(None)
 
     artifact = await _route_request_to_matching_agent(
         routing_agent,
@@ -109,8 +120,8 @@ async def test_route_raises_when_failed_without_route_target() -> None:
         agent_name=None,
         message="cannot route",
     )
-    routing_agent = _StubRoutingAgent(response)
-    registry = _StubRegistry(None)
+    routing_agent = _routing_agent(response)
+    registry = _registry(None)
 
     with pytest.raises(RoutingFailed, match="cannot route"):
         await _route_request_to_matching_agent(routing_agent, registry, _ctx())
